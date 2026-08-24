@@ -24,6 +24,7 @@ const packageDirs = {
   workshop: "cloudflare-os/packages/workshop-backend",
   context: "cloudflare-os/packages/gatekeeper-context",
   scheduler: "cloudflare-os/packages/gatekeeper-scheduler",
+  mcp: "cloudflare-os/packages/gatekeeper-mcp",
   customGatekeeper: "packages/custom-gatekeeper",
   errorReporter: "packages/error-reporter",
 } as const;
@@ -39,14 +40,13 @@ const requiredPaths = [
   "workers.workshop.name",
   "workers.context.name",
   "workers.scheduler.name",
-  "workers.customGatekeeper.name",
   "access.issuer",
   "access.audience",
   "access.admins",
   "aiGateway.enabled",
   "errorReporting.enabled",
-  "customGatekeeper.name",
-  "customGatekeeper.message",
+  "mcp.enabled",
+  "customGatekeeper.enabled",
   "observability.enabled",
   "observability.headSamplingRate",
   "observability.logs.invocationLogs",
@@ -64,6 +64,18 @@ const aiGatewayPaths = [
 const errorReportingPaths = [
   "workers.errorReporter.name",
   "errorReporting.environment",
+];
+
+// The MCP Gatekeeper's Worker name is the whole of its configuration: everything else it needs is
+// in the submodule's own base config.
+const mcpPaths = [
+  "workers.mcp.name",
+];
+
+const customGatekeeperPaths = [
+  "workers.customGatekeeper.name",
+  "customGatekeeper.name",
+  "customGatekeeper.message",
 ];
 
 const resourcePaths = [
@@ -164,6 +176,8 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
     ...requiredPaths,
     ...(config.aiGateway?.enabled ? aiGatewayPaths : []),
     ...(config.errorReporting?.enabled ? errorReportingPaths : []),
+    ...(config.mcp?.enabled ? mcpPaths : []),
+    ...(config.customGatekeeper?.enabled ? customGatekeeperPaths : []),
   ];
   for (const path of activePaths) {
     const value = valueAt(config, path);
@@ -189,6 +203,23 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
       errorReporting: { enabled: false },
     };
   }
+  // Same treatment for the two optional Gatekeepers: a placeholder left in a block this deployment
+  // never reads is not an error, and scanning it anyway would make disabling one impossible without
+  // also inventing values for it.
+  if (!config.mcp.enabled) {
+    activeConfig = {
+      ...activeConfig,
+      workers: { ...activeConfig.workers, mcp: undefined },
+      mcp: { enabled: false },
+    };
+  }
+  if (!config.customGatekeeper.enabled) {
+    activeConfig = {
+      ...activeConfig,
+      workers: { ...activeConfig.workers, customGatekeeper: undefined },
+      customGatekeeper: { enabled: false },
+    };
+  }
   const placeholder = JSON.stringify(activeConfig).match(/<[^>]+>/)?.[0];
   if (placeholder) throw new Error(`Replace deployment placeholder ${placeholder}.`);
 
@@ -197,6 +228,8 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
     "aiGateway.enabled",
     "aiGateway.providers",
     "errorReporting.enabled",
+    "mcp.enabled",
+    "customGatekeeper.enabled",
     "observability.enabled",
     "observability.headSamplingRate",
     "observability.logs.invocationLogs",
@@ -212,12 +245,20 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
   if (!accountIdPattern.test(config.accountId)) {
     throw new Error("Cloudflare account IDs must be 32 hexadecimal characters.");
   }
+  // A disabled Worker's name is not deployed, so it is neither required to be present nor required
+  // to be unique -- only the ones this deployment actually creates are.
+  const enabledWorkers: Record<string, boolean> = {
+    errorReporter: config.errorReporting.enabled,
+    mcp: config.mcp.enabled,
+    customGatekeeper: config.customGatekeeper.enabled,
+  };
   const workerNames = Object.entries(config.workers)
-    .filter(([key]) => key !== "errorReporter" || config.errorReporting.enabled)
-    .map(([, worker]) => worker.name);
+    .filter(([key]) => enabledWorkers[key] ?? true)
+    .map(([, worker]) => worker!.name);
   if (new Set(workerNames).size !== workerNames.length) {
     throw new Error(
-      "Router, Workshop, Context, Scheduler, and custom Gatekeeper names must be unique.");
+      "Every deployed Worker name must be unique: Router, Workshop, Context, Scheduler, and each " +
+      "enabled Gatekeeper and Reporter.");
   }
   if (!workerNames.every((name) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name))) {
     throw new Error("Worker names must use lowercase letters, numbers, and hyphens.");
@@ -266,6 +307,12 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
 
   if (typeof config.errorReporting.enabled !== "boolean") {
     throw new Error("Error reporting enabled must be a boolean.");
+  }
+  if (typeof config.mcp?.enabled !== "boolean") {
+    throw new Error("mcp.enabled must be a boolean.");
+  }
+  if (typeof config.customGatekeeper?.enabled !== "boolean") {
+    throw new Error("customGatekeeper.enabled must be a boolean.");
   }
   const release = config.errorReporting.release;
   if (release !== null && release !== undefined &&
@@ -434,7 +481,10 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
   const workshop = structuredClone(bases.workshop);
   const context = structuredClone(bases.context);
   const scheduler = structuredClone(bases.scheduler);
-  const customGatekeeper = structuredClone(bases.customGatekeeper);
+  const mcp = config.mcp.enabled ? structuredClone(bases.mcp) : undefined;
+  const customGatekeeper = config.customGatekeeper.enabled
+    ? structuredClone(bases.customGatekeeper)
+    : undefined;
   const errorReporter = config.errorReporting.enabled
     ? structuredClone(bases.errorReporter)
     : undefined;
@@ -447,7 +497,12 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
     // vendor-RPC bindings. The binding name is what picks the /gatekeeper/<name> path.
     { binding: "GATEKEEPER_CONTEXT", service: config.workers.context.name },
     { binding: "GATEKEEPER_SCHEDULER", service: config.workers.scheduler.name },
-    { binding: "GATEKEEPER_CUSTOM", service: config.workers.customGatekeeper.name },
+    ...(config.mcp.enabled
+      ? [{ binding: "GATEKEEPER_MCP", service: config.workers.mcp!.name }]
+      : []),
+    ...(config.customGatekeeper.enabled
+      ? [{ binding: "GATEKEEPER_CUSTOM", service: config.workers.customGatekeeper!.name }]
+      : []),
   ];
 
   setCommon(workshop, config, config.workers.workshop.name);
@@ -508,11 +563,18 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
       service: config.workers.scheduler.name,
       entrypoint: "GatekeeperVendor",
     },
-    {
-      binding: "GATEKEEPER_CUSTOM",
-      service: config.workers.customGatekeeper.name,
+    // No props either: the MCP Gatekeeper scopes its accounts to its own `McpAccount` Durable
+    // Objects, which belong to that Worker's script identity. Only Context takes a prop.
+    ...(config.mcp.enabled ? [{
+      binding: "GATEKEEPER_MCP",
+      service: config.workers.mcp!.name,
       entrypoint: "GatekeeperVendor",
-    },
+    }] : []),
+    ...(config.customGatekeeper.enabled ? [{
+      binding: "GATEKEEPER_CUSTOM",
+      service: config.workers.customGatekeeper!.name,
+      entrypoint: "GatekeeperVendor",
+    }] : []),
   ];
   workshop.kv_namespaces = [
     { binding: "BLUEPRINTS", ...(config.resources.blueprintsKvNamespaceId
@@ -546,18 +608,38 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
   // here without adding a configuration surface for it.
   setCommon(scheduler, config, config.workers.scheduler.name);
 
-  setCommon(customGatekeeper, config, config.workers.customGatekeeper.name);
-  customGatekeeper.vars = {
-    CUSTOM_NAME: config.customGatekeeper.name,
-    CUSTOM_MESSAGE: config.customGatekeeper.message,
-  };
+  if (mcp) {
+    setCommon(mcp, config, config.workers.mcp!.name);
+    mcp.vars = {
+      // Unlike Context and Scheduler, the MCP Gatekeeper is an OAuth gatekeeper: `getBaseUrl()` in
+      // gatekeeper-mcp/src/mcp.ts builds its connect form and OAuth callback URLs from this, and
+      // falls back to `http://localhost:8787/gatekeeper/mcp` when it is unset. Unset in production
+      // that is not a broken deploy but a broken *redirect*, discovered only when a user tries to
+      // connect a server -- so it is derived here rather than left to the base config.
+      //
+      // The path is the router's `/gatekeeper/<short>` route, and `<short>` is the binding name
+      // minus its prefix, lowercased: GATEKEEPER_MCP -> mcp.
+      ...mcp.vars,
+      BASE_URL: `${origin}/gatekeeper/mcp`,
+    };
+  }
+
+  if (customGatekeeper) {
+    setCommon(customGatekeeper, config, config.workers.customGatekeeper!.name);
+    customGatekeeper.vars = {
+      CUSTOM_NAME: config.customGatekeeper.name!,
+      CUSTOM_MESSAGE: config.customGatekeeper.message!,
+    };
+  }
 
   if (errorReporter) {
     setCommon(errorReporter, config, config.workers.errorReporter!.name);
   }
 
   return {
-    router, workshop, context, scheduler, customGatekeeper,
+    router, workshop, context, scheduler,
+    ...(mcp && { mcp }),
+    ...(customGatekeeper && { customGatekeeper }),
     ...(errorReporter && { errorReporter }),
   };
 }
@@ -604,7 +686,12 @@ export function buildCommands(config: DeploymentConfig): BuildCommand[] {
     // The Scheduler's `build` nests the same cached `vp run build:app`, so it needs the same pair.
     { args: submoduleBuild("@gadgets/gatekeeper-scheduler", "build:app") },
     { args: submoduleBuild("@gadgets/gatekeeper-scheduler") },
-    { args: ownBuild("custom-gatekeeper") },
+    // One step, unlike the pair above: the MCP Gatekeeper's `build` is a Vite+ *task* declaring
+    // `dependsOn: ["build:configurator"]` (cloudflare-os/scripts/gatekeeper-configurator-vite-config.ts),
+    // so `--no-cache` reaches the codegen through the dependency rather than being swallowed by a
+    // nested `vp run` carrying its own flag.
+    ...(config.mcp.enabled ? [{ args: submoduleBuild("@gadgets/mcp-gatekeeper") }] : []),
+    ...(config.customGatekeeper.enabled ? [{ args: ownBuild("custom-gatekeeper") }] : []),
     ...(config.errorReporting.enabled ? [{ args: ownBuild("error-reporter") }] : []),
     // Access mode is a build-time constant in the frontend bundle (`src/useAuth.ts`), so it is set
     // here rather than inherited: a bundle built under a different value is wrong, not just stale.
@@ -719,6 +806,7 @@ async function main(): Promise<void> {
     workshop: await readJsonc(join(root, packageDirs.workshop, "wrangler.jsonc")),
     context: await readJsonc(join(root, packageDirs.context, "wrangler.jsonc")),
     scheduler: await readJsonc(join(root, packageDirs.scheduler, "wrangler.jsonc")),
+    mcp: await readJsonc(join(root, packageDirs.mcp, "wrangler.jsonc")),
     customGatekeeper: await readJsonc(join(root, packageDirs.customGatekeeper, "wrangler.jsonc")),
     errorReporter: await readJsonc(join(root, packageDirs.errorReporter, "wrangler.jsonc")),
   });
@@ -739,7 +827,12 @@ async function main(): Promise<void> {
     }
     deployWorker(packageDirs.context, deployArgs);
     deployWorker(packageDirs.scheduler, deployArgs);
-    deployWorker(packageDirs.customGatekeeper, deployArgs);
+    if (config.mcp.enabled) {
+      deployWorker(packageDirs.mcp, deployArgs);
+    }
+    if (config.customGatekeeper.enabled) {
+      deployWorker(packageDirs.customGatekeeper, deployArgs);
+    }
     deployWorker(packageDirs.workshop, deployArgs);
     // Last: it binds every one of the above.
     deployWorker(packageDirs.router, deployArgs);

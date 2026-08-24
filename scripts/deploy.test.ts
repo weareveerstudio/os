@@ -18,6 +18,7 @@ const validConfig: DeploymentConfig = {
     workshop: { name: "acme-cloudflare-os-backend" },
     context: { name: "acme-cloudflare-os-context" },
     scheduler: { name: "acme-cloudflare-os-scheduler" },
+    mcp: { name: "acme-cloudflare-os-mcp" },
     customGatekeeper: { name: "acme-cloudflare-os-custom" },
     errorReporter: { name: "acme-cloudflare-os-errors" },
   },
@@ -37,7 +38,8 @@ const validConfig: DeploymentConfig = {
     kvNamespaceId: "context-kv-id",
     artifacts: { enabled: true, namespace: "acme-context-collections" },
   },
-  customGatekeeper: { name: "Acme", message: "Use the company handbook." },
+  mcp: { enabled: true },
+  customGatekeeper: { enabled: true, name: "Acme", message: "Use the company handbook." },
   errorReporting: { enabled: true, environment: "production", release: "abc123" },
   resources: {
     blueprintsKvNamespaceId: "blueprints-kv-id",
@@ -73,6 +75,7 @@ async function baseConfigs(): Promise<BaseConfigs> {
     workshop: await baseConfig("../cloudflare-os/packages/workshop-backend/wrangler.jsonc"),
     context: await baseConfig("../cloudflare-os/packages/gatekeeper-context/wrangler.jsonc"),
     scheduler: await baseConfig("../cloudflare-os/packages/gatekeeper-scheduler/wrangler.jsonc"),
+    mcp: await baseConfig("../cloudflare-os/packages/gatekeeper-mcp/wrangler.jsonc"),
     customGatekeeper: await baseConfig("../packages/custom-gatekeeper/wrangler.jsonc"),
     errorReporter: await baseConfig("../packages/error-reporter/wrangler.jsonc"),
   };
@@ -221,6 +224,11 @@ test("generates Access-mode Workshop, Context, and custom Gatekeeper configs", a
       entrypoint: "GatekeeperVendor",
     },
     {
+      binding: "GATEKEEPER_MCP",
+      service: "acme-cloudflare-os-mcp",
+      entrypoint: "GatekeeperVendor",
+    },
+    {
       binding: "GATEKEEPER_CUSTOM",
       service: "acme-cloudflare-os-custom",
       entrypoint: "GatekeeperVendor",
@@ -237,8 +245,13 @@ test("generates Access-mode Workshop, Context, and custom Gatekeeper configs", a
     binding: "ARTIFACTS",
     namespace: "acme-context-collections",
   }]);
-  assert.equal(generated.customGatekeeper.name, "acme-cloudflare-os-custom");
-  assert.deepEqual(generated.customGatekeeper.vars, {
+  assert.equal(generated.mcp!.name, "acme-cloudflare-os-mcp");
+  // Load-bearing: unset, gatekeeper-mcp's getBaseUrl() silently falls back to localhost and every
+  // OAuth callback it hands a remote MCP server points off the deployment.
+  assert.equal(generated.mcp!.vars!.BASE_URL, "https://os.example.com/gatekeeper/mcp");
+  assert.equal(generated.mcp!.vars!.MCP_ALLOW_INSECURE, "false");
+  assert.equal(generated.customGatekeeper!.name, "acme-cloudflare-os-custom");
+  assert.deepEqual(generated.customGatekeeper!.vars, {
     CUSTOM_NAME: "Acme",
     CUSTOM_MESSAGE: "Use the company handbook.",
   });
@@ -267,6 +280,7 @@ test("gives the router the public route, the frontend, and every service binding
     { binding: "WORKSHOP_BACKEND", service: "acme-cloudflare-os-backend" },
     { binding: "GATEKEEPER_CONTEXT", service: "acme-cloudflare-os-context" },
     { binding: "GATEKEEPER_SCHEDULER", service: "acme-cloudflare-os-scheduler" },
+    { binding: "GATEKEEPER_MCP", service: "acme-cloudflare-os-mcp" },
     { binding: "GATEKEEPER_CUSTOM", service: "acme-cloudflare-os-custom" },
   ]);
   // Inherited untouched: the base config already carries the ASSETS binding, the SPA fallback, and
@@ -483,6 +497,62 @@ test("omits disabled backend error reporting", async () => {
   assert.equal(generated.errorReporter, undefined);
   assert.equal(generated.workshop.services!.some(
     (service) => service.binding === "ERROR_REPORTER"), false);
+});
+
+// The disabled Gatekeepers drop out of *both* binding lists, not just their own config. A binding
+// left behind on the router or the Workshop names a service this deploy never creates, which
+// wrangler rejects -- and a binding silently kept while the Worker is gone is the failure mode
+// docs/migrate-from-hosted.md section 7 describes in the other direction.
+test("omits a disabled MCP Gatekeeper from both binding lists", async () => {
+  const config = variant((c) => {
+    c.mcp = { enabled: false };
+    c.workers.mcp = { name: "<MCP_WORKER_NAME>" };
+  });
+
+  const generated = generateConfigs(config, await baseConfigs());
+
+  assert.equal(generated.mcp, undefined);
+  assert.equal(generated.workshop.services!.some((s) => s.binding === "GATEKEEPER_MCP"), false);
+  assert.equal(generated.router.services!.some((s) => s.binding === "GATEKEEPER_MCP"), false);
+});
+
+test("omits a disabled custom Gatekeeper from both binding lists", async () => {
+  const config = variant((c) => {
+    c.customGatekeeper = { enabled: false, name: "<ORG_NAME>", message: "<ORG_GUIDANCE>" };
+    c.workers.customGatekeeper = { name: "<CUSTOM_GATEKEEPER_WORKER_NAME>" };
+  });
+
+  const generated = generateConfigs(config, await baseConfigs());
+
+  assert.equal(generated.customGatekeeper, undefined);
+  assert.equal(generated.workshop.services!.some((s) => s.binding === "GATEKEEPER_CUSTOM"), false);
+  assert.equal(generated.router.services!.some((s) => s.binding === "GATEKEEPER_CUSTOM"), false);
+});
+
+// An enabled Gatekeeper still has to be named: silently deploying one under an undefined name is
+// how an unrelated Worker in the account gets overwritten.
+test("requires a Worker name for each enabled optional Gatekeeper", () => {
+  assert.throws(
+    () => validateConfig(variant((c) => { delete c.workers.mcp; })),
+    /workers\.mcp\.name/);
+  assert.throws(
+    () => validateConfig(variant((c) => { delete c.workers.customGatekeeper; })),
+    /workers\.customGatekeeper\.name/);
+});
+
+// The build is what makes disabling worth anything: a disabled Gatekeeper should cost no build
+// step, not merely be dropped from the generated config afterwards.
+test("builds only the enabled Gatekeepers", () => {
+  const enabled = buildCommands(validConfig).map((command) => command.args.join(" "));
+  assert.ok(enabled.some((args) => args.includes("@gadgets/mcp-gatekeeper")));
+  assert.ok(enabled.some((args) => args.includes("custom-gatekeeper")));
+
+  const disabled = buildCommands(variant((c) => {
+    c.mcp = { enabled: false };
+    c.customGatekeeper = { enabled: false, name: "<ORG_NAME>", message: "<ORG_GUIDANCE>" };
+  })).map((command) => command.args.join(" "));
+  assert.ok(!disabled.some((args) => args.includes("@gadgets/mcp-gatekeeper")));
+  assert.ok(!disabled.some((args) => args.includes("custom-gatekeeper")));
 });
 
 test("omits dormant AI Gateway configuration", async () => {

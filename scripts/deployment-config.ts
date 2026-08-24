@@ -111,15 +111,24 @@ export interface DeploymentConfig {
     workshop: { name: string };
     context: { name: string };
     scheduler: { name: string };
-    customGatekeeper: { name: string };
+    /** Only required when `mcp.enabled`. */
+    mcp?: { name: string };
+    /** Only required when `customGatekeeper.enabled`. */
+    customGatekeeper?: { name: string };
     /** Only required when `errorReporting.enabled`. */
     errorReporter?: { name: string };
   };
   access: AccessConfig;
   aiGateway: AiGatewayConfigInput;
   context: ContextConfig;
+  /**
+   * The upstream MCP Gatekeeper, which lets users connect remote MCP servers. Deployed from the
+   * submodule rather than `packages/`, so it takes no configuration beyond its Worker name -- the
+   * portal variant (`gatekeeper-mcp-portal`) is the one that needs a URL, and this is not it.
+   */
+  mcp: { enabled: boolean };
   /** Display text the example custom Gatekeeper serves to agents. */
-  customGatekeeper: { name: string; message: string };
+  customGatekeeper: { enabled: boolean; name?: string; message?: string };
   /** Private explicit-issue destination. */
   errorReporting: { enabled: boolean; environment?: string; release?: string | null };
   /** Workshop KV/R2. `null` requests Wrangler automatic provisioning. */
@@ -181,7 +190,10 @@ export interface GeneratedConfigs {
   workshop: ProdWranglerConfig;
   context: ProdWranglerConfig;
   scheduler: ProdWranglerConfig;
-  customGatekeeper: ProdWranglerConfig;
+  /** Absent when `mcp.enabled` is false. */
+  mcp?: ProdWranglerConfig;
+  /** Absent when `customGatekeeper.enabled` is false. */
+  customGatekeeper?: ProdWranglerConfig;
   /** Absent when `errorReporting.enabled` is false. */
   errorReporter?: ProdWranglerConfig;
 }
@@ -192,6 +204,7 @@ export interface BaseConfigs {
   workshop: ProdWranglerConfig;
   context: ProdWranglerConfig;
   scheduler: ProdWranglerConfig;
+  mcp: ProdWranglerConfig;
   customGatekeeper: ProdWranglerConfig;
   errorReporter: ProdWranglerConfig;
 }

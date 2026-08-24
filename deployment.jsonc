@@ -1,7 +1,7 @@
 {
   // Cloudflare account that owns every Worker and provisioned resource.
   // Find it: https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/
-  "accountId": "<CLOUDFLARE_ACCOUNT_ID>",
+  "accountId": "cae2b6350c3a5a8bc9451652ffb0c9d7",
 
   // The deployment's public origin, used for PUBLIC_BASE_URL and to scope Context data.
   // null derives it from workers.router.route.customDomain.
@@ -16,24 +16,30 @@
     // Owns the public URL and serves the frontend. Proxies /api and /blueprint-screenshot to the
     // Workshop, and /gatekeeper/<name> to the matching Gatekeeper.
     "router": {
-      "name": "<ROUTER_WORKER_NAME>",
+      "name": "veeros",
 
       // Production: use a hostname in an active Cloudflare zone. Wrangler creates DNS and TLS.
       // Evaluation: replace this with "route": { "workersDev": true } and set publicBaseUrl above.
       // https://developers.cloudflare.com/workers/configuration/routing/custom-domains/
-      "route": { "customDomain": "os.example.com" }
+      "route": { "customDomain": "os.veer.studio" }
     },
 
     // The Workshop backend. No public route: the router reaches it over a service binding.
-    "workshop": { "name": "<WORKSHOP_WORKER_NAME>" },
-    "context": { "name": "<CONTEXT_WORKER_NAME>" },
+    "workshop": { "name": "veeros-backend" },
+    "context": { "name": "veeros-gk-context" },
 
     // The Scheduler Gatekeeper, which gives agents scheduled and recurring work. Ambient like
     // the Context Gatekeeper
-    "scheduler": { "name": "<SCHEDULER_WORKER_NAME>" },
+    "scheduler": { "name": "veeros-gk-scheduler" },
 
-    "customGatekeeper": { "name": "<CUSTOM_GATEKEEPER_WORKER_NAME>" },
-    "errorReporter": { "name": "<ERROR_REPORTER_WORKER_NAME>" }
+    // The MCP Gatekeeper, which lets users connect remote MCP servers. Installed by the hosted
+    // deploy; named here so the generated configs keep binding it as GATEKEEPER_MCP. Dropping the
+    // binding would leave the Worker running with its accounts intact but invisible to the app.
+    "mcp": { "name": "veeros-gk-mcp" },
+
+    // Both disabled below, so neither name is read. Kept for the next iteration.
+    // "customGatekeeper": { "name": "veeros-gk-custom" },
+    // "errorReporter": { "name": "veeros-errors" }
   },
 
   // This starter deploys Cloudflare Access mode. Cloudflare OS also supports built-in password
@@ -42,9 +48,9 @@
   // "admins" gates /admin in every sign-in method.
   // Reference: docs/customization.md#sign-in-methods
   "access": {
-    "issuer": "https://<TEAM_NAME>.cloudflareaccess.com",
-    "audience": "<ACCESS_AUDIENCE>",
-    "admins": ["<ADMIN_EMAIL>"]
+    "issuer": "https://veerstudio.cloudflareaccess.com",
+    "audience": "14ac9b99f0da63268b12320a9a8b1e2fae50b39ff48b28157a0b3e0d300e94ed",
+    "admins": ["chacha@veer.studio"]
   },
 
   // Model catalog served through Cloudflare AI Gateway. Enabled by default: the Workshop reaches
@@ -57,7 +63,7 @@
     // Your account's AI Gateway. "default" is the one Cloudflare creates for the account.
     // Migrating from the hosted deploy? Use the gateway that flow created: "<instance>-ai"
     // (e.g. "cloudflareos-ai"), named after your instance. See docs/migrate-from-hosted.md.
-    "name": "default",
+    "name": "veeros-ai",
 
     // null reuses the top-level accountId. Set only if the gateway lives in another account --
     // that requires CF_AI_GATEWAY_API_TOKEN, since the binding cannot reach across accounts.
@@ -65,7 +71,10 @@
 
     // "cloudflare" is Workers AI, which needs no key of your own. anthropic/openai need keys
     // stored on the gateway; "google" additionally requires CF_AI_GATEWAY_API_TOKEN.
-    "providers": ["cloudflare"]
+    // The Anthropic key (veeros-ai_anthropic_default) lives in the gateway's own Secrets Store,
+    // not in the Worker, so it needs no secret here -- but the provider has to be listed or its
+    // models are never advertised.
+    "providers": ["cloudflare", "anthropic"]
   },
 
   "context": {
@@ -75,29 +84,34 @@
 
     // null: Wrangler provisions and remembers a KV namespace on first deploy.
     // string: bind an existing namespace by ID.
-    "kvNamespaceId": null
+    "kvNamespaceId": "b203bda152124baa9ff21e147c182537",
 
     // Optional Git-compatible storage for Context collections. To enable it, add a comma after
     // kvNamespaceId and uncomment this object. Requires Artifacts account access.
-    // "artifacts": {
-    //   "enabled": true,
-    //   // Optional override; defaults to "gatekeeper-context-collections".
-    //   "namespace": "custom-context-collections"
-    // }
+    "artifacts": {
+      "enabled": true,
+      // Optional override; defaults to "gatekeeper-context-collections".
+      "namespace": "veeros-context-collections"
+    }
   },
 
-  // Displayed to agents when the example custom integration is enabled in /admin.
+  // The upstream MCP Gatekeeper. Its Worker name in workers.mcp is the whole configuration.
+  "mcp": { "enabled": true },
+
+  // The example custom integration. Disabled: packages/custom-gatekeeper is kept for reference and
+  // the next iteration, but nothing is built, deployed, or bound while this is false.
   // Reference: docs/customization.md#custom-gatekeepers
   "customGatekeeper": {
-    "name": "<ORGANIZATION_DISPLAY_NAME>",
-    "message": "<ORGANIZATION_GUIDANCE>"
+    "enabled": false,
+    "name": "VEER.studio",
+    "message": "Your Creative Partner"
   },
 
   // Explicit backend issue reports go to a private Worker that emits structured console errors.
   // Set release to a commit/version when your deployment pipeline has one.
   // Reference: docs/observability.md#quick-start
   "errorReporting": {
-    "enabled": true,
+    "enabled": false,
     "environment": "production",
     "release": null
   },
@@ -105,9 +119,9 @@
   // null values use Wrangler automatic provisioning. Set IDs/names to reuse owned resources.
   // https://developers.cloudflare.com/workers/wrangler/configuration/#automatic-provisioning
   "resources": {
-    "blueprintsKvNamespaceId": null,
-    "avatarsKvNamespaceId": null,
-    "blueprintContentBucket": null
+    "blueprintsKvNamespaceId": "4ee876087f654c14a2129953d0308152",
+    "avatarsKvNamespaceId": "380a24bf2d82473fab8040db6c91678d",
+    "blueprintContentBucket": "veeros-blueprint-content"
   },
 
   // Structured custom logs stay enabled. Invocation logs and traces are separate volume controls.

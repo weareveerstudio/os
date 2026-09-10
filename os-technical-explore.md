@@ -1668,13 +1668,49 @@ Storage properties worth knowing before we build anything large on it:
 
 ### 14.2 What is *not* involved: Artifacts, R2, refs
 
-**Cloudflare Artifacts has nothing to do with this.** Artifacts is the Context Gatekeeper's
-git-backed collection feature (§3.1) — `gatekeeper-context/src/artifact-sync.ts` clones a remote
-repository over HTTP into an in-memory filesystem to populate Context documents, and the
-`context.artifacts` block in `deployment.jsonc` configures a KV namespace for repository
-registration and tokens. It is a *content ingestion* path for Context collections. The workspace git
-store is a different mechanism in a different Worker (the Workshop's Overseer DO, not the Context
-Gatekeeper) serving a different purpose. The two share only that both happen to speak git.
+**Cloudflare Artifacts is not what backs this**, though the guess is a fair one — Artifacts is a
+real Cloudflare product ("Git-compatible file storage on Cloudflare Workers"), and this deployment
+already uses it. Upstream never writes down a rejection, so what follows is the constraint set,
+not a quoted decision.
+
+*What Artifacts actually is here.* A Workers binding whose entire surface is a **control plane**:
+`create`, `get`, `import`, `list`, `delete`, and on a repo handle `createToken`, `listTokens`,
+`revokeToken`, `fork`. There is no object or file read/write on the binding at all. Content is
+reached the ordinary way — mint a scoped token, then speak git over HTTPS. That is exactly what
+`gatekeeper-context/src/artifact-sync.ts` does for Context collections: `repo.createToken("read",
+3600)`, clone over `isomorphic-git/http/web` with the token as HTTP basic auth, revoke the token
+afterward. Our `context.artifacts` block in `deployment.jsonc` generates a first-class
+`artifacts` wrangler binding (`ARTIFACTS`, namespace `veeros-context-collections`) — not a KV
+namespace; `kvNamespaceId` / `CONTEXT_COLLECTIONS` is the separate one.
+
+*The decisive constraint is availability, and it is stated outright* — in
+`scripts/release/manifest-lib.ts:251`, of all places:
+
+> gatekeeper-context's Artifacts binding is closed-beta and cannot be provisioned in arbitrary
+> user accounts; it is dropped from customer manifests (the gatekeeper degrades gracefully).
+
+The release manifest *cuts* the binding for customer instances, and `ARTIFACTS_CUT_ALLOWED`
+(`:256`) hard-fails the build if any package other than `gatekeeper-context` declares one:
+*"only gatekeeper-context's is known (and cut). Decide how customer instances should handle this
+one."* Context can survive the cut because git-backed collections are an optional feature that
+degrades to unavailable. A Workshop whose **entire code storage** were Artifacts could not degrade
+at all — it would simply not run in most accounts. That alone rules it out for the kernel,
+independent of any design preference.
+
+*The structural mismatch points the same way* (this part is inference from the API surface, not
+upstream's words). The store is read on the hot path — every `readFile`, every tree walk, every
+`isAncestor` step — and Artifacts offers no way to read one object. Reaching it means a token and
+a git fetch, i.e. the Overseer DO leaving the isolate to speak a wire protocol to fetch bytes it
+would otherwise read straight out of its own storage. It also mints *repositories*, which is the
+per-gadget-repo model §14.1 explicitly rejected, and it carries a ref layer the workspace
+deliberately does not want (see below). And a write token is a credential to store, rotate and
+revoke — the Context Gatekeeper's handling of exactly that is why `deployment.jsonc` warns that
+Artifacts repository write tokens are credentials.
+
+Where Artifacts *would* fit is the direction upstream actually gestures at: the store uses real git
+formats specifically so code can later be exported to and imported from real repositories, and
+`Artifacts.import()` takes an HTTPS git remote. An "export this gadget to a repo" path is a
+plausible future use. Nothing implements it today.
 
 **R2 is not involved either.** The objects live in the Overseer DO's own storage via the
 `gitObjects` typed-storage collection — the same SQLite-backed storage that holds gadget records

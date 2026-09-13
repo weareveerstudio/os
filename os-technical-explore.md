@@ -9,14 +9,14 @@ such. §13 records what the latest bump changed. **Line references in §§1–12
 `6478a144` and have not all been re-verified** — treat them as "roughly here, grep for the
 identifier". §§13–14 references are current.
 
-**Status.** Deployed and verified 2026-08-23 at pin `6478a144`. Data retained. Extended 2026-08-29:
+**Status.** First deployed and verified 2026-08-23 at pin `6478a144`. Data retained. Extended 2026-08-29:
 §8 with the session / ApprovalQueue mechanics, simulation, singletons and management UIs; §9.5 with
 `gatekeeper-email`; §11.2 with the media-service sketch.
 
-**Pin bumped 2026-09-09** to `54d5d8b0` and again **2026-09-13** to `08afe059`, both validated with
-`pnpm check`, **neither deployed**. §13 is the upgrade log; §14 covers the git-backed code storage
-and worktrees the first bump brought in. The live Workers still run the code built from `6478a144`
-until someone runs `pnpm deploy`, so the deploy now carries both bumps at once.
+**Deployed 2026-09-13** at pin `08afe059`. §13 is the upgrade log; §14 covers the git-backed code
+storage and worktrees. See §13.0 for the deploy record and the correction to what was live before
+it: `54d5d8b0` had already been deployed on 2026-09-10, outside this repo's session history, so the
+one-way git-storage migration ran then rather than now.
 
 ---
 
@@ -1462,11 +1462,10 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 ### Decided, not yet done
 
-- **Deploy the pending bumps.** The gitlink is at `08afe059`, installed and `pnpm check`-clean, but
-  the live Workers still run `6478a144` — so one deploy now carries both bumps. That means the
-  one-way git-storage migration (§13.3), the compatibility-date move (§13.4), and the connect-flow
-  and restricted-data changes (§13.0). It wants the ordinary approval + post-deploy verification
-  pass, not a drive-by `pnpm deploy`.
+- **Finish post-deploy verification of the 2026-09-13 deploy.** The CLI-checkable items passed
+  (§13.0); the authenticated ones did not run — `/admin` positive and negative, a denied identity,
+  the model picker, schedules still listed and a new one firing, and an end-to-end connect through
+  the new handoff flow. Do these in a browser before relying on any connector.
 - **Three blueprints** — message board, todo list, kanban; Basecamp-5 styled, built in-platform from
   `format.document`, promoted via `/admin` → Formats (path A). Read the extracted `server.js` first
   to decide whether to inherit its `document:v2` revision model.
@@ -1487,6 +1486,10 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 ### Watch
 
+- **This repo is not the only thing that deploys to this account.** A full `pnpm deploy` landed on
+  2026-09-10 that no commit or note here records (§13.0). Before any deploy, read the live version
+  IDs from the account rather than trusting this doc — and note `wrangler deployments list` prints
+  **oldest-first**, so the current version is the *last* entry.
 - **Node 24.15.0 < declared `>=24.19.0`** — warning only today
 - **`README.md` says "The deployment is six Workers"** — stale; the count is now configurable
 - **Any future OAuth Gatekeeper needs `BASE_URL`** — nothing enforces it. Since `08afe059`,
@@ -1521,7 +1524,41 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 Newest first.
 
-### 13.0 `54d5d8b0` → `08afe059` (2026-09-13)
+### 13.0 `54d5d8b0` → `08afe059` (2026-09-13) — deployed
+
+**Deploy record.** Deployed 2026-09-13 19:31–19:32 UTC, account `cae2b6350c3a5a8bc9451652ffb0c9d7`
+(VEER Studio), route `os.veer.studio`, from root commit `303dc0a` / submodule `08afe059`. All five
+active Workers deployed in the script's order, exit 0.
+
+| Worker | Previous version (rollback target) | New version |
+|---|---|---|
+| `veeros-gk-context` | `f8c5cba6-347b-47ae-974b-fd3bb52324b3` | `31f55ebd-5526-47ed-977d-05b18e6fa4fa` |
+| `veeros-gk-scheduler` | `8b4315a0-3457-4221-b4d0-a234b6bbb980` | `c348f02c-43d8-4a11-bd96-6dd6f4dda510` |
+| `veeros-gk-mcp` | `926160ca-d874-42a5-a109-958fb61d497b` | `1ff0187f-dcf5-42bd-9c40-2d82143840d4` |
+| `veeros-backend` | `5b113d30-fdc9-40fb-8c2d-4e16c679a6c7` | `07d644e5-e59c-4621-a8f9-14005b0282c7` |
+| `veeros` (router) | `59355b84-6873-457d-b2fa-683ce8ab92cf` | `593eba4d-a7bd-4239-9ff8-d0e663fb9a4f` |
+
+Verified after deploy: valid TLS on `os.veer.studio`; an unauthenticated request 302s to
+`veerstudio.cloudflareaccess.com` with the audience matching the configured `CF_ACCESS_AUD`;
+`/api`, `/gatekeeper/mcp` and the new `/connect/handoff` all sit behind the same Access
+application; the backend's new version carries compatibility date `2026-09-04` with
+`PUBLIC_BASE_URL` present, and `wrangler` reported *"No targets deployed for veeros-backend"* —
+the Router holds the only route. The frontend bundle includes `connect.handoff-*.js`, the route
+#473 added.
+
+**Not verified** (needs an authenticated browser session, not a CLI probe): `/admin` allowing an
+administrator and denying an authenticated non-administrator; a denied negative-test identity;
+the model picker listing providers; existing schedules still listed and a new one firing;
+end-to-end connect through the new handoff. Worth doing before relying on any connector.
+
+**Correction to the previous status.** This doc claimed `54d5d8b0` was "not yet deployed". It was
+wrong. `wrangler deployments list` shows all five Workers deployed **2026-09-10 ~10:25–10:27 UTC**
+in the script's order, and the then-live backend version `5b113d30` carried compatibility date
+`2026-09-04` without `enhanced_error_serialization` — i.e. the `54d5d8b0` build. That deploy
+happened outside this repo's recorded session history. **Consequence: the one-way git-storage
+migration (§13.3) ran on 2026-09-10, not on 2026-09-13.** The 2026-09-13 deploy carried only the
+six commits below. Lesson recorded in §12: `deployments list` prints oldest-first, and the doc's
+notion of what is live is not evidence — check the account.
 
 Six commits, 2026-09-09 → 2026-09-11. Another clean fast-forward. **The wrapper needed no changes
 at all this time** — no catalog drift, no workspace reshape, no `package.json` edit; `pnpm install`

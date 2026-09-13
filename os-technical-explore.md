@@ -3,7 +3,7 @@
 Working notes for the `os.veer.studio` deployment: what was changed to get push→deploy working
 against the existing hosted-flow Workers, and what the upstream platform actually provides.
 
-**Scope.** Findings are read from the pinned submodule at `54d5d8b0` (2026-09-08). Line references
+**Scope.** Findings are read from the pinned submodule at `08afe059` (2026-09-11). Line references
 are to that commit and will drift on upgrade. Anything not verified against source is marked as
 such. §13 records what the latest bump changed. **Line references in §§1–12 were taken at
 `6478a144` and have not all been re-verified** — treat them as "roughly here, grep for the
@@ -13,9 +13,10 @@ identifier". §§13–14 references are current.
 §8 with the session / ApprovalQueue mechanics, simulation, singletons and management UIs; §9.5 with
 `gatekeeper-email`; §11.2 with the media-service sketch.
 
-**Pin bumped 2026-09-09** to `54d5d8b0`, validated with `pnpm check`, **not yet deployed**. §13 is
-the upgrade log; §14 covers the git-backed code storage and worktrees the bump brings in. The live
-Workers still run the code built from `6478a144` until someone runs `pnpm deploy`.
+**Pin bumped 2026-09-09** to `54d5d8b0` and again **2026-09-13** to `08afe059`, both validated with
+`pnpm check`, **neither deployed**. §13 is the upgrade log; §14 covers the git-backed code storage
+and worktrees the first bump brought in. The live Workers still run the code built from `6478a144`
+until someone runs `pnpm deploy`, so the deploy now carries both bumps at once.
 
 ---
 
@@ -42,7 +43,9 @@ Workers still run the code built from `6478a144` until someone runs `pnpm deploy
     - 11.1 [Client portal and billing](#111-client-portal-and-billing)
     - 11.2 [Media service on R2](#112-media-service-on-r2)
 12. [Open items](#12-open-items)
-13. [Upgrade log: `6478a144` → `54d5d8b0`](#13-upgrade-log-6478a144--54d5d8b0)
+13. [Upgrade log](#13-upgrade-log)
+    - 13.0 [`54d5d8b0` → `08afe059` (2026-09-13)](#130-54d5d8b0--08afe059-2026-09-13)
+    - [`6478a144` → `54d5d8b0` (2026-09-09)](#6478a144--54d5d8b0-2026-09-09)
 14. [Git-backed code storage and worktrees](#14-git-backed-code-storage-and-worktrees)
     - 14.1 [One store per workspace, not one repo per gadget](#141-one-store-per-workspace-not-one-repo-per-gadget)
     - 14.2 [What is *not* involved: Artifacts, R2, refs](#142-what-is-not-involved-artifacts-r2-refs)
@@ -1459,10 +1462,11 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 ### Decided, not yet done
 
-- **Deploy the `54d5d8b0` bump.** The gitlink is bumped, installed and `pnpm check`-clean, but the
-  live Workers still run `6478a144`. Deploying carries the one-way git-storage migration (§13.3)
-  and the compatibility-date bump (§13.4), so it wants the ordinary approval + post-deploy
-  verification pass, not a drive-by `pnpm deploy`.
+- **Deploy the pending bumps.** The gitlink is at `08afe059`, installed and `pnpm check`-clean, but
+  the live Workers still run `6478a144` — so one deploy now carries both bumps. That means the
+  one-way git-storage migration (§13.3), the compatibility-date move (§13.4), and the connect-flow
+  and restricted-data changes (§13.0). It wants the ordinary approval + post-deploy verification
+  pass, not a drive-by `pnpm deploy`.
 - **Three blueprints** — message board, todo list, kanban; Basecamp-5 styled, built in-platform from
   `format.document`, promoted via `/admin` → Formats (path A). Read the extracted `server.js` first
   to decide whether to inherit its `document:v2` revision model.
@@ -1485,7 +1489,14 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 - **Node 24.15.0 < declared `>=24.19.0`** — warning only today
 - **`README.md` says "The deployment is six Workers"** — stale; the count is now configurable
-- **Any future OAuth Gatekeeper needs `BASE_URL`** — nothing enforces it
+- **Any future OAuth Gatekeeper needs `BASE_URL`** — nothing enforces it. Since `08afe059`,
+  `PUBLIC_BASE_URL` on the *backend* is load-bearing for every connector too (§13.0), and a
+  Gatekeeper with a connect flow must implement the new `complete()` / `reconnectComplete()`
+  handoff contract.
+- **Typed-storage property names are storage keys** — renaming a persisted field is a migration
+  unless it declares `storageKey` / `storageName` (§13.0)
+- **Restricted data has a stated `use`-collaborator hole** (§13.0) — relevant before connecting any
+  gatekeeper holding client-confidential data to a workspace with `use` collaborators
 - **`blueprintId` is an install key** — never rename after deploy
 - **Upstream `enableHook` / `disableHook` race** (`overseer.ts:2697`, `enableHookRecord`, at pin
   `54d5d8b0`) — a losing `enable()` can
@@ -1506,7 +1517,80 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 ---
 
-## 13. Upgrade log: `6478a144` → `54d5d8b0`
+## 13. Upgrade log
+
+Newest first.
+
+### 13.0 `54d5d8b0` → `08afe059` (2026-09-13)
+
+Six commits, 2026-09-09 → 2026-09-11. Another clean fast-forward. **The wrapper needed no changes
+at all this time** — no catalog drift, no workspace reshape, no `package.json` edit; `pnpm install`
+reported "Already up to date" for both workspaces. `pnpm check` passes, all six Workers dry-run
+clean. The starter remains 0 behind `upstream/main` (we are 3 ahead, all ours).
+
+No storage migration, no Durable Object or wrangler changes, no compatibility-date movement. The
+range is two security fixes and a policy change:
+
+**Connect flows are now bound to the initiating browser** (#464, #473). A gatekeeper connect URL
+was a bearer capability: whoever finished OAuth at it had their provider tokens delivered into the
+account that *started* the flow, so an attacker could start a connect and phish a victim into
+opening the URL. Now the gatekeeper's final page posts a single-use ticket (SHA-256 of a fresh
+256-bit value, two-minute lifetime) plus a per-flow nonce, redeemed from the popup itself over the
+initiating user's own session; an alarm revokes staged connects whose ticket never comes back.
+The follow-up (#473) moved redemption into the popup and dropped the BroadcastChannel transport
+entirely.
+
+Two consequences for us:
+
+- **`GatekeeperConnectCallback.complete()` is a breaking contract change** — it now returns a
+  `ConnectHandoff` instead of `void`, and a new `reconnectComplete(stageId, expiresAt?)` covers
+  reconnect / `ensureResources`, staging credentials until the Workshop calls
+  `GatekeeperUser.commitReconnect()`. `credentialsRestored()` survives for out-of-band refresh only.
+  **Any Gatekeeper we write with an OAuth connect flow must implement this.** Our
+  `packages/custom-gatekeeper` is unaffected: its `connectAccount` throws
+  ("auto-provisioned and has no connect flow"), so there is no callback to update.
+  `gatekeeper-kit` ships `connectHandoffPageHtml()` for the final page.
+- **`PUBLIC_BASE_URL` is now required for connects**, read on the *backend*
+  (`workshop-backend/src/connect-handoff.ts:30`), which throws
+  *"PUBLIC_BASE_URL is not configured, so account connections cannot complete."* Ours is set to
+  `https://os.veer.studio` and appears in the dry-run bindings, so this is satisfied — but it
+  sharpens the §12 watch item: the variable is now load-bearing for every connector, not just for
+  absolute links and OAuth redirects.
+
+**Restricted-data sharing moved from lockdown to per-collaborator verification** (#381, #382, #308).
+`ObservationDescription.prohibitAllSharing` is renamed `containsRestrictedData` (and
+`GadgetMetadata.sharingProhibited` likewise) — a hard rename with no alias, because the flag states
+a fact about the data while the *policy* was being replaced. The old behaviour was blunt: one
+restricted observation blocked sharing with anyone, "which made every sensitive data source
+unusable the moment a workspace had a single collaborator." Now the workspace stays shareable and
+each collaborator is admitted only while verified as an observer of the producing gatekeeper,
+checked at **every `open()`** rather than at grant time, with any widening of scope restarting live
+sessions. The two guards that are about data leaving rather than who may see it — no actions, no
+public web fetches once latched — are kept.
+
+Upstream states two limits of the new model plainly, worth knowing before we connect anything
+sensitive:
+
+- **Coverage is held to each collaborator's role scope.** A `use` collaborator is verified only
+  against gatekeepers in their scope. The agent can read an *unbound* gatekeeper through a chat
+  binding, persist the restricted result into gadget storage or UI state, and thereby expose it to
+  an unverified `use` collaborator. Upstream labels this a *"Known security limitation"* and
+  accepts it for this implementation.
+- **Enforcement is at admission, not at each read**, and share-key redemption stays one-step — so
+  an unverified redeemer and a refused recipient both persist in `listCollaborators` until removed.
+  Two-phase redemption is the stated follow-up.
+
+The rename is storage-safe by construction, and the mechanism is reusable: `typed-storage` gained
+`singleton(default, {storageKey})` and `collection(..., {storageName})` so a schema can declare the
+key it lives under. The overseer's singleton keeps `storageKey: "prohibitAllSharing"` on disk —
+without it, *"every workspace that has already observed restricted data would silently unlatch."*
+Worth remembering the next time we rename a persisted field: in typed-storage, property names
+**are** keys.
+
+Also in range: an integration test covering a deleted workspace's listing over a fresh session
+(#478).
+
+### `6478a144` → `54d5d8b0` (2026-09-09)
 
 Bumped 2026-09-09. 82 commits, 2026-08-18 → 2026-09-08. The old pin is a strict ancestor of
 `origin/main`, so this was a clean fast-forward with no divergence to reconcile. The starter wrapper

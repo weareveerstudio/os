@@ -11,11 +11,9 @@ Unqualified `overseer.ts` / `gatekeeper.ts` mean `workshop-backend/src/overseer.
 
 **Status.**
 
-- **Live:** pin `08afe059`, deployed 2026-09-13 (§13.2). Confirmed against the account on
-  2026-09-29 — nothing has deployed since.
-- **Pinned, not deployed:** `ef65348f`, bumped 2026-09-29 on branch `bump/cloudflare-os-ef65348f`
-  (§13.1). `pnpm lint`, `pnpm check` and `pnpm test` pass. Blocked on finishing the browser
-  verification of the 2026-09-13 deploy (§12).
+- **Live:** pin `ef65348f`, deployed 2026-09-29 15:08–15:12 UTC from root `0558097` (§13.1).
+  CLI-checkable verification passed; the authenticated browser checks are outstanding (§12).
+- **Previous:** pin `08afe059`, deployed 2026-09-13 (§13.2) — the rollback baseline.
 
 ---
 
@@ -43,7 +41,7 @@ Unqualified `overseer.ts` / `gatekeeper.ts` mean `workshop-backend/src/overseer.
     - 11.2 [Media service on R2](#112-media-service-on-r2)
 12. [Open items](#12-open-items)
 13. [Upgrade log](#13-upgrade-log)
-    - 13.1 [`08afe059` → `ef65348f` (2026-09-29) — not deployed](#131-08afe059--ef65348f-2026-09-29--not-deployed)
+    - 13.1 [`08afe059` → `ef65348f` (2026-09-29) — deployed](#131-08afe059--ef65348f-2026-09-29--deployed)
     - 13.2 [`54d5d8b0` → `08afe059` (2026-09-13) — deployed](#132-54d5d8b0--08afe059-2026-09-13--deployed)
     - 13.3 [`6478a144` → `54d5d8b0` (2026-09-09) — deployed 2026-09-10](#133-6478a144--54d5d8b0-2026-09-09--deployed-2026-09-10)
 14. [Git-backed code storage and worktrees](#14-git-backed-code-storage-and-worktrees)
@@ -141,8 +139,8 @@ disabled, and MCP's `BASE_URL` / `MCP_ALLOW_INSECURE` vars. **30/30 pass** (stil
 
 ## 2. Live account inventory
 
-Verified against the account on 2026-09-29, read-only (`wrangler whoami`, `deployments list`,
-`secret list`).
+Verified against the account on 2026-09-29, before and after the `ef65348f` deploy (`wrangler
+whoami`, `deployments list`, `secret list`, `versions view`).
 
 | Item | Value |
 |---|---|
@@ -152,16 +150,16 @@ Verified against the account on 2026-09-29, read-only (`wrangler whoami`, `deplo
 
 ### Workers
 
-All five were last deployed 2026-09-13 19:31–19:32 UTC at pin `08afe059`. These are the rollback
-targets for the next deploy.
+All five were deployed 2026-09-29 15:08–15:12 UTC at pin `ef65348f`. The previous column holds the
+`08afe059` versions — the rollback targets, subject to the caveat in §13.1.
 
-| Worker | Role | Live version |
-|---|---|---|
-| `veeros` | Router — the only public route | `593eba4d-a7bd-4239-9ff8-d0e663fb9a4f` |
-| `veeros-backend` | Workshop — **all user data** (Durable Objects) | `07d644e5-e59c-4621-a8f9-14005b0282c7` |
-| `veeros-gk-context` | Context Gatekeeper | `31f55ebd-5526-47ed-977d-05b18e6fa4fa` |
-| `veeros-gk-scheduler` | Scheduler Gatekeeper | `c348f02c-43d8-4a11-bd96-6dd6f4dda510` |
-| `veeros-gk-mcp` | MCP Gatekeeper | `1ff0187f-dcf5-42bd-9c40-2d82143840d4` |
+| Worker | Role | Live version | Previous version |
+|---|---|---|---|
+| `veeros` | Router — the only public route | `94c4fd56-e271-4338-b19d-e2cd5bae16ac` | `593eba4d-a7bd-4239-9ff8-d0e663fb9a4f` |
+| `veeros-backend` | Workshop — **all user data** (Durable Objects) | `022aebcc-4a8c-45db-a5e9-b7d26f07edd5` | `07d644e5-e59c-4621-a8f9-14005b0282c7` |
+| `veeros-gk-context` | Context Gatekeeper | `25fbbd55-bcf1-412d-a666-644800eb52ee` | `31f55ebd-5526-47ed-977d-05b18e6fa4fa` |
+| `veeros-gk-scheduler` | Scheduler Gatekeeper | `90e3a47d-1563-4538-a0c2-145f02c61e4b` | `c348f02c-43d8-4a11-bd96-6dd6f4dda510` |
+| `veeros-gk-mcp` | MCP Gatekeeper | `d717fc33-6b94-4cfb-a2d5-815d62b69f57` | `1ff0187f-dcf5-42bd-9c40-2d82143840d4` |
 
 Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
 `wrangler deployments list` prints **oldest-first**; the current version is the *last* entry.
@@ -176,8 +174,8 @@ Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
 | `BLUEPRINT_CONTENT` | `veeros-blueprint-content` (R2) |
 | `ARTIFACTS` | `veeros-context-collections` (Artifacts namespace; `context.artifacts.enabled: true`) |
 
-Workshop Durable Object migrations live: `v0`–`v2`, all additive `new_sqlite_classes`. `ef65348f`
-adds `v3` (`UserDirectoryDurableObject`), also additive (§13.1).
+Workshop Durable Object migrations live: `v0`–`v3`, all additive `new_sqlite_classes` — `v3`
+(`UserDirectoryDurableObject`) arrived with `ef65348f` (§13.1).
 
 ### Notes
 
@@ -1623,14 +1621,14 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 ### Decided, not yet done
 
-- **Finish post-deploy verification of the 2026-09-13 deploy.** The CLI-checkable items passed
-  (§13.2); the authenticated ones did not run — `/admin` positive and negative, a denied identity,
-  the model picker, schedules still listed and a new one firing, and an end-to-end connect through
-  the handoff flow. Do these in a browser before deploying `ef65348f`, so a failure can be pinned to
-  one pin.
-- **Deploy `ef65348f`** — merge `bump/cloudflare-os-ef65348f`, then per §13.1: read live version IDs
-  first, present the mutation summary, deploy, run the full verification. **Decide
-  `userSearchEnabled` before deploying** and set it explicitly in `/admin` straight after (§6).
+- **Authenticated verification of the `ef65348f` deploy.** The CLI-checkable items passed (§13.1);
+  the browser ones have not run for this deploy *or* the 2026-09-13 one — `/admin` positive and
+  negative, a denied identity, the model picker (including the new models), schedules still listed
+  and a new one firing, the Context catalog in a new chat, and an end-to-end connect through the
+  handoff flow. Do these before relying on any connector.
+- **Turn user search on explicitly.** Decided 2026-09-29: user search **on**. Set the toggle in
+  `/admin` rather than relying on the `!signupsEnabled` default (§6), so the choice is stored and
+  survives a later signups change.
 - **Three blueprints** — message board, todo list, kanban; Basecamp-5 styled, built in-platform from
   `format.document`, promoted via `/admin` → Formats (path A). Read
   `bundled-blueprints/blueprints/workspace-docs/files/server.ts` and `libraries/sync` first to
@@ -1694,12 +1692,36 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 Newest first.
 
-### 13.1 `08afe059` → `ef65348f` (2026-09-29) — not deployed
+### 13.1 `08afe059` → `ef65348f` (2026-09-29) — deployed
 
 55 commits, 2026-09-14 → 2026-09-28. A clean fast-forward; the starter wrapper remains 0 behind
 `cloudflare/cloudflare-os-starter`. Bumped on branch `bump/cloudflare-os-ef65348f` (commit
-`e57084c`). `pnpm lint`, `pnpm check` (30/30 wrapper tests, all five active Workers dry-run clean,
-generated configs removed) and `pnpm test` pass. Upstream's own suites were not run.
+`e57084c`), fast-forwarded into `main`. `pnpm lint`, `pnpm check` (30/30 wrapper tests, all five
+active Workers dry-run clean, generated configs removed) and `pnpm test` pass. Upstream's own suites
+were not run.
+
+**Deploy record.** Deployed 2026-09-29 15:08–15:12 UTC, account `cae2b6350c3a5a8bc9451652ffb0c9d7`,
+route `os.veer.studio`, from root commit `0558097` / submodule `ef65348f`, after re-reading the live
+versions (unchanged since 2026-09-13). All five active Workers deployed in the script's order, exit 0.
+
+| Worker | Previous version (rollback target) | New version |
+|---|---|---|
+| `veeros-gk-context` | `31f55ebd-5526-47ed-977d-05b18e6fa4fa` | `25fbbd55-bcf1-412d-a666-644800eb52ee` |
+| `veeros-gk-scheduler` | `c348f02c-43d8-4a11-bd96-6dd6f4dda510` | `90e3a47d-1563-4538-a0c2-145f02c61e4b` |
+| `veeros-gk-mcp` | `1ff0187f-dcf5-42bd-9c40-2d82143840d4` | `d717fc33-6b94-4cfb-a2d5-815d62b69f57` |
+| `veeros-backend` | `07d644e5-e59c-4621-a8f9-14005b0282c7` | `022aebcc-4a8c-45db-a5e9-b7d26f07edd5` |
+| `veeros` (router) | `593eba4d-a7bd-4239-9ff8-d0e663fb9a4f` | `94c4fd56-e271-4338-b19d-e2cd5bae16ac` |
+
+**Verified after deploy:** valid TLS on `os.veer.studio`; unauthenticated requests to `/`, `/api/`,
+`/gatekeeper/mcp`, `/gatekeeper/context`, `/connect/handoff` and `/admin` all 302 to
+`veerstudio.cloudflareaccess.com` carrying the configured audience; every backend reported *"No
+targets deployed"* — the Router holds the only route; the new backend version carries compatibility
+date `2026-09-04`, `PUBLIC_BASE_URL`, and the same storage, gatekeeper, AI and Access bindings as
+before. **Not verified:** everything needing an authenticated browser session (§12).
+
+**One local cleanup before building:** the main checkout held a stale, now-unignored
+`workshop-backend/src/generated/format-blueprints.ts` from the old pin's build (#466 renamed the
+generated module). Nothing referenced it; it was deleted.
 
 #### What the wrapper had to change
 
@@ -1730,7 +1752,7 @@ Durable Object migration must be checked against the rollback docs before relyin
 #### Behaviour changes that matter to us
 
 - **User directory and search** (#474) — §6. The `!signupsEnabled` default turns search on for
-  closed-signup deployments; decide before deploying.
+  closed-signup deployments. Decided: on, to be set explicitly in `/admin` (§12).
 - **Restricted mode replaces lockdown** (#487), plus **`ownerInvitesOnly`** (#523) and
   **`descriptionIsComplete` / `fields`** (#541, #565) — §8.2, §8.3. A restricted workspace now
   works, with every action manually approved and git pushes refused.
@@ -1754,12 +1776,6 @@ Durable Object migration must be checked against the rollback docs before relyin
 - **Also**: Google Drive folder resource and Docs tables (#440, #518), multi-invite (#526), the
   agent-facing `types.d.ts` self-containment lint (#581, #582), and three rounds of public-API kernel
   integration tests.
-
-#### Verification to add for this deploy
-
-On top of the standing list: `/admin` shows the user-search toggle and it is set as decided; the
-model picker lists providers and the new models; an existing schedule still fires; the Context
-catalog loads in a new chat.
 
 ### 13.2 `54d5d8b0` → `08afe059` (2026-09-13) — deployed
 

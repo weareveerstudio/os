@@ -1,28 +1,27 @@
 # Cloudflare OS — Technical Exploration
 
-Working notes for the `os.veer.studio` deployment: what was changed to get push→deploy working
-against the existing hosted-flow Workers, and what the upstream platform actually provides.
+Working notes for the `os.veer.studio` deployment: what this wrapper changes relative to the starter,
+what the upstream platform actually provides, and what each upgrade changed.
 
-**Scope.** Findings are read from the pinned submodule at `08afe059` (2026-09-11). Line references
-are to that commit and will drift on upgrade. Anything not verified against source is marked as
-such. §13 records what the latest bump changed. **Line references in §§1–12 were taken at
-`6478a144` and have not all been re-verified** — treat them as "roughly here, grep for the
-identifier". §§13–14 references are current.
+**Scope.** Read from the pinned submodule at `ef65348f` (2026-09-28). Every `file:line` reference in
+§§3–14 was re-verified at that commit on 2026-09-29. They drift on every bump — after the next one,
+treat them as "grep for the identifier". Anything not verified against source is marked as such.
+Unqualified `overseer.ts` / `gatekeeper.ts` mean `workshop-backend/src/overseer.ts` and
+`workshop-shared/src/gatekeeper.ts`.
 
-**Status.** First deployed and verified 2026-08-23 at pin `6478a144`. Data retained. Extended 2026-08-29:
-§8 with the session / ApprovalQueue mechanics, simulation, singletons and management UIs; §9.5 with
-`gatekeeper-email`; §11.2 with the media-service sketch.
+**Status.**
 
-**Deployed 2026-09-13** at pin `08afe059`. §13 is the upgrade log; §14 covers the git-backed code
-storage and worktrees. See §13.0 for the deploy record and the correction to what was live before
-it: `54d5d8b0` had already been deployed on 2026-09-10, outside this repo's session history, so the
-one-way git-storage migration ran then rather than now.
+- **Live:** pin `08afe059`, deployed 2026-09-13 (§13.2). Confirmed against the account on
+  2026-09-29 — nothing has deployed since.
+- **Pinned, not deployed:** `ef65348f`, bumped 2026-09-29 on branch `bump/cloudflare-os-ef65348f`
+  (§13.1). `pnpm lint`, `pnpm check` and `pnpm test` pass. Blocked on finishing the browser
+  verification of the 2026-09-13 deploy (§12).
 
 ---
 
 ## Contents
 
-1. [Deployment: what changed and why](#1-deployment-what-changed-and-why)
+1. [Deployment: what the wrapper changes](#1-deployment-what-the-wrapper-changes)
 2. [Live account inventory](#2-live-account-inventory)
 3. [Context Gatekeeper](#3-context-gatekeeper)
 4. [Blueprints and output formats](#4-blueprints-and-output-formats)
@@ -44,23 +43,26 @@ one-way git-storage migration ran then rather than now.
     - 11.2 [Media service on R2](#112-media-service-on-r2)
 12. [Open items](#12-open-items)
 13. [Upgrade log](#13-upgrade-log)
-    - 13.0 [`54d5d8b0` → `08afe059` (2026-09-13)](#130-54d5d8b0--08afe059-2026-09-13)
-    - [`6478a144` → `54d5d8b0` (2026-09-09)](#6478a144--54d5d8b0-2026-09-09)
+    - 13.1 [`08afe059` → `ef65348f` (2026-09-29) — not deployed](#131-08afe059--ef65348f-2026-09-29--not-deployed)
+    - 13.2 [`54d5d8b0` → `08afe059` (2026-09-13) — deployed](#132-54d5d8b0--08afe059-2026-09-13--deployed)
+    - 13.3 [`6478a144` → `54d5d8b0` (2026-09-09) — deployed 2026-09-10](#133-6478a144--54d5d8b0-2026-09-09--deployed-2026-09-10)
 14. [Git-backed code storage and worktrees](#14-git-backed-code-storage-and-worktrees)
     - 14.1 [One store per workspace, not one repo per gadget](#141-one-store-per-workspace-not-one-repo-per-gadget)
     - 14.2 [What is *not* involved: Artifacts, R2, refs](#142-what-is-not-involved-artifacts-r2-refs)
     - 14.3 [The merge model: the chat is the branch](#143-the-merge-model-the-chat-is-the-branch)
     - 14.4 [Worktrees — mounting a remote commit](#144-worktrees--mounting-a-remote-commit)
-    - 14.5 [The git flows exposed to the agent](#145-the-git-flows-exposed-to-the-agent)
+    - 14.5 [The git flows exposed to the agent and to gadgets](#145-the-git-flows-exposed-to-the-agent-and-to-gadgets)
     - 14.6 [`GitCache` — the gatekeeper side](#146-gitcache--the-gatekeeper-side)
-    - 14.7 [What this means for us](#147-what-this-means-for-us)
+    - 14.7 [Spawned agents](#147-spawned-agents)
+    - 14.8 [What this means for us](#148-what-this-means-for-us)
 
 ---
 
-## 1. Deployment: what changed and why
+## 1. Deployment: what the wrapper changes
 
 This deployment was created by the hosted flow (`os.cloudflare.app/deploy`) and ejected to this
-starter repo. Four problems had to be solved before `pnpm deploy` was safe to run.
+starter repo. Four problems had to be solved before `pnpm deploy` was safe to run; the fixes are
+still the wrapper's only functional divergence from `cloudflare/cloudflare-os-starter`.
 
 ### 1.1 The MCP Gatekeeper would have been silently orphaned
 
@@ -78,7 +80,7 @@ the hosted wizard keep running as Workers, but the generated configs no longer c
 - `packageDirs.mcp` → `cloudflare-os/packages/gatekeeper-mcp`
 - Bound as `GATEKEEPER_MCP` on the router (bare) and on the Workshop (`entrypoint:
   "GatekeeperVendor"`, no props — only Context takes a prop)
-- One build step: `vp run -F @gadgets/mcp-gatekeeper --no-cache build`. Unlike Context and
+- One build step, `vp run --no-cache build` on `@gadgets/mcp-gatekeeper`. Unlike Context and
   Scheduler it needs no paired `build:app` call, because its `build` is a Vite+ *task* declaring
   `dependsOn: ["build:configurator"]`, so `--no-cache` reaches the codegen through the dependency
   rather than being swallowed by a nested `vp run`.
@@ -89,16 +91,16 @@ Router path is `/gatekeeper/mcp` — `<short>` is the binding name minus its pre
 ### 1.2 `BASE_URL` was missing on the MCP Worker
 
 **The bug, and why it was easy to miss.** The hosted deploy sets `BASE_URL` on every Gatekeeper;
-this wrapper sets it on none. That never mattered, because neither Context nor Scheduler reads it —
+this wrapper set it on none. That never mattered, because neither Context nor Scheduler reads it —
 only OAuth-style Gatekeepers do. MCP is the first one this deployment runs.
 
-`getBaseUrl()` in `gatekeeper-mcp/src/mcp.ts:89` falls back to
-`http://localhost:8787/gatekeeper/mcp` when unset, and it feeds the connect form and **OAuth
-callback** handler. Unset in production, every OAuth redirect handed to a remote MCP server would
-have pointed at localhost — a failure surfacing only when a user first tried to connect a server.
+`getBaseUrl()` in `gatekeeper-mcp` falls back to `http://localhost:8787/gatekeeper/mcp` when unset,
+and it feeds the connect form and **OAuth callback** handler. Unset in production, every OAuth
+redirect handed to a remote MCP server would have pointed at localhost — a failure surfacing only
+when a user first tried to connect a server.
 
-**The fix.** `deploy.ts` now derives it: `BASE_URL: ${origin}/gatekeeper/mcp`. Verified in the
-dry-run as `https://os.veer.studio/gatekeeper/mcp`.
+**The fix.** `deploy.ts` derives it: `BASE_URL: ${origin}/gatekeeper/mcp`. Verified in the dry-run
+as `https://os.veer.studio/gatekeeper/mcp`.
 
 > **Rule for any future OAuth Gatekeeper: it needs `BASE_URL`.** Nothing enforces this — the deploy
 > succeeds without it.
@@ -113,6 +115,10 @@ It now mirrors the `errorReporter` pattern exactly — gated in validation, plac
 Worker-name uniqueness, config generation, both binding lists, the build, and the deploy. Code stays
 in `packages/custom-gatekeeper/` for a later iteration; nothing is built, deployed, or bound while
 `customGatekeeper.enabled` is false.
+
+**Side effect: `pnpm check` never compiles a disabled package.** Only `pnpm lint` type-checks
+`packages/custom-gatekeeper`. That is how a Gatekeeper-contract change left it failing to compile
+for a whole pin without anyone noticing (§13.1). Run `pnpm lint` on every bump.
 
 ### 1.4 AI Gateway name was wrong
 
@@ -129,13 +135,14 @@ parsed into a `Set`.
 
 `scripts/deploy.test.ts` gained four cases covering the new paths — a disabled Gatekeeper dropping
 out of *both* binding lists, an enabled one still requiring a Worker name, build steps skipped when
-disabled, and MCP's `BASE_URL` / `MCP_ALLOW_INSECURE` vars. **30/30 pass.**
+disabled, and MCP's `BASE_URL` / `MCP_ALLOW_INSECURE` vars. **30/30 pass** (still, at `ef65348f`).
 
 ---
 
 ## 2. Live account inventory
 
-Verified against the account on 2026-08-23.
+Verified against the account on 2026-09-29, read-only (`wrangler whoami`, `deployments list`,
+`secret list`).
 
 | Item | Value |
 |---|---|
@@ -145,15 +152,19 @@ Verified against the account on 2026-08-23.
 
 ### Workers
 
-| Worker | Role | Deployed by this repo |
+All five were last deployed 2026-09-13 19:31–19:32 UTC at pin `08afe059`. These are the rollback
+targets for the next deploy.
+
+| Worker | Role | Live version |
 |---|---|---|
-| `veeros` | Router — the only public route | ✅ |
-| `veeros-backend` | Workshop — **all user data** (Durable Objects) | ✅ |
-| `veeros-gk-context` | Context Gatekeeper | ✅ |
-| `veeros-gk-scheduler` | Scheduler Gatekeeper | ✅ |
-| `veeros-gk-mcp` | MCP Gatekeeper | ✅ (added this iteration) |
+| `veeros` | Router — the only public route | `593eba4d-a7bd-4239-9ff8-d0e663fb9a4f` |
+| `veeros-backend` | Workshop — **all user data** (Durable Objects) | `07d644e5-e59c-4621-a8f9-14005b0282c7` |
+| `veeros-gk-context` | Context Gatekeeper | `31f55ebd-5526-47ed-977d-05b18e6fa4fa` |
+| `veeros-gk-scheduler` | Scheduler Gatekeeper | `c348f02c-43d8-4a11-bd96-6dd6f4dda510` |
+| `veeros-gk-mcp` | MCP Gatekeeper | `1ff0187f-dcf5-42bd-9c40-2d82143840d4` |
 
 Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
+`wrangler deployments list` prints **oldest-first**; the current version is the *last* entry.
 
 ### Storage
 
@@ -163,57 +174,47 @@ Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
 | `BLUEPRINTS` | `4ee876087f654c14a2129953d0308152` (`veeros-blueprints`) |
 | `AVATARS` | `380a24bf2d82473fab8040db6c91678d` (`veeros-avatars`) |
 | `BLUEPRINT_CONTENT` | `veeros-blueprint-content` (R2) |
-| `ARTIFACTS` | `veeros-context-collections` (namespace; enabled this iteration) |
+| `ARTIFACTS` | `veeros-context-collections` (Artifacts namespace; `context.artifacts.enabled: true`) |
 
-### Rollback baseline (pre-deploy versions)
-
-```
-veeros                 07add0bb-5cf9-4ce4-b40f-1c725a4899a1
-veeros-backend         b96e9cf1-3c24-4e8d-9a03-8223436b89af
-veeros-gk-context      c7294bc9-1690-42be-aa55-25515292aa8e
-veeros-gk-scheduler    9c583708-c57f-47d8-94f7-7ab27bb46a34
-veeros-gk-mcp          bbf28977-9ce0-4442-b5c9-6bf330dad897
-```
-
-The prior release was `dev-tjd58j` (2026-08-10); the pin is 8 days newer, so this was an upgrade,
-not a downgrade. Workshop DO migrations v0–v2 are all additive `new_sqlite_classes` — no deletes or
-renames.
+Workshop Durable Object migrations live: `v0`–`v2`, all additive `new_sqlite_classes`. `ef65348f`
+adds `v3` (`UserDirectoryDurableObject`), also additive (§13.1).
 
 ### Notes
 
-- The Workshop carries a leftover `CF_AI_GATEWAY_API_TOKEN` secret from the hosted flow. It survives
-  deploys and is **unused** — transport picks the `WORKERS_AI` binding unless
-  `CF_AI_GATEWAY_USE_BINDING=false`.
+- The Workshop still carries a leftover `CF_AI_GATEWAY_API_TOKEN` secret from the hosted flow
+  (present 2026-09-29). It survives deploys and is **unused** — transport picks the `WORKERS_AI`
+  binding unless `CF_AI_GATEWAY_USE_BINDING=false`.
 - `DEPLOY_URL` was dropped, removing the "manage this deployment" link. Expected; documented in
   `docs/migrate-from-hosted.md` §7.
 - `context.sharingDomain: null` derives `https://os.veer.studio`, which **matches** the hosted
   instance's origin — the Context data boundary was preserved. Had the hosted instance been on
   `workers.dev`, this would have silently hidden all collections.
-- Local Node is 24.15.0 against a declared `>=24.19.0`. Only a warning; `pnpm check` passes.
+- Local Node is 24.15.0 against a declared `>=24.19.0`. Only a warning.
 
 ---
 
 ## 3. Context Gatekeeper
 
 An **ambient** Gatekeeper holding collections of documents, exposed to the agent as a catalog it can
-search and read.  UI at `https://os.veer.studio/gatekeeper/context`.
+search and read. UI at `https://os.veer.studio/gatekeeper/context`. All paths below are in
+`packages/gatekeeper-context/src/`.
 
 ### 3.1 Collections
 
-Two content sources (`context-types.ts:97`):
+Two content sources (`ContextCollectionContent`, `context-types.ts:96`):
 
 | Source | Content managed via | Requires |
 |---|---|---|
 | `{ source: "web" }` | The Context UI | — |
-| `{ source: "git", remote, branch, commit }` | `git push` to an Artifacts repo | Artifacts (enabled) |
+| `{ source: "git", remote, branch, lastRefreshedAt, commit? }` | `git push` to an Artifacts repo | Artifacts (enabled) — else *"Git-backed Context collections are not enabled."* (`context-api.ts:110`) |
 
-Visibility is `"public"` or `"private"`, and the authorization is only two branches
-(`context-api.ts:89`–`108`):
+Visibility is `"public"` or `"private"` within a sharing domain, and the authorization is only two
+branches (`#assertCanRead` / `#assertCanWrite`, `context-api.ts:89`–`108`):
 
 | Visibility | Read | Write |
 |---|---|---|
 | `private` | Owning account only | Owning account only |
-| `public` | Every user in the deployment | **Admins only** |
+| `public` | Every user in the deployment | **Admins only** (creating one also needs admin, `:133`) |
 
 There is **no ACL, no collaborator list, and no share link for collections.** "Shared with these
 three people but not everyone" does not exist. `public` + admin-only-write is the intended shape for
@@ -222,8 +223,8 @@ a curated house knowledge base.
 ### 3.2 Skills
 
 A skill is **any file named exactly `SKILL.md`**, anywhere in any collection
-(`agent-skill.ts:129`). No manifest, no registration, no admin step. Each becomes a slash command
-*and* an agent catalog entry.
+(`isSkillManifestPath`, `agent-skill.ts:130`). No manifest, no registration, no admin step. Each
+becomes a slash command *and* an agent catalog entry.
 
 ```markdown
 ---
@@ -234,35 +235,43 @@ description: Draft the weekly client status note from the project's context docs
 Write a status update for $ARGUMENT following our house format...
 ```
 
-- `name` — lowercase, numbers, single hyphens, ≤64 chars → `/weekly-status`
-- `description` — ≤1024 chars; this is what the agent uses to judge relevance
-- `$ARGUMENT` is substituted; if absent, argument text is appended
+- `name` — `^[a-z0-9]+(?:-[a-z0-9]+)*$`, ≤64 chars → `/weekly-status`
+- `description` — ≤1024 chars after trimming; this is what the agent uses to judge relevance
+- `$ARGUMENT` is substituted; if absent, the text is appended as `ARGUMENT: <args>`
+  (`buildAgentSkillMessage`, `agent-skill.ts:106`)
 - The body is delivered with a **skill root**, so a skill can be a folder (`SKILL.md` plus reference
   docs) and cite siblings by relative path
-- Catalog advertises at most **150** skills (`AGENT_SKILL_CATALOG_MAX_ENTRIES`); collections always
-  win the remaining space. Skills past the cap remain searchable but unadvertised.
+- The catalog lists collections first, then at most **150** skills
+  (`AGENT_SKILL_CATALOG_MAX_ENTRIES`, `agent-skill.ts:17`) and sets `truncated` past that. Skills
+  beyond the cap remain reachable through `list()`/`search()` but are unadvertised.
 
 ### 3.3 Size limits
 
-**One document limit shared by both modes: `MAX_DOCUMENT_BODY_BYTES = 1_400_000`**
-(`context-types.ts:212`). Enforcement differs, and this is the trap:
+**One document limit shared by both modes: `MAX_DOCUMENT_BODY_BYTES = 1_800_000`**
+(`context-types.ts:212`, "headroom below SQLite's 2 MB serialized-value limit"). Enforcement differs,
+and this is the trap:
 
 | | Web / UI mode | Git mode |
 |---|---|---|
-| Checked at | `context-collection.ts:361`, on write | `artifact-sync.ts:241`, on sync |
-| Over limit | **Throws** | **Silently skipped** — logs `context.file.oversized.skipped` |
+| Checked at | `context-collection.ts:385`, on write | `artifact-sync.ts:259`, on sync |
+| Measures | Body bytes **plus** the record's JSON metadata | Raw blob bytes |
+| Over limit | **Throws** *"Document is too large…"* | **Silently skipped** — logs `context.file.oversized.skipped` |
 
 Push a 2 MB file to a git-backed collection and it simply is not there. No error, no failed sync.
 
-- **Binary is measured base64-encoded** (`Math.ceil(len / 3) * 4`), so the real ceiling for binary is
-  **~1.05 MB** of raw bytes.
-- **Git mode has a repo-wide cap:** `MAX_GIT_DIR_BYTES = 64 MB` (`artifact-sync.ts:26`), covering the
-  working directory *including git objects* — history counts toward it.
-- Path length: 1024 characters.
+- **Bodies are stored as bytes** (UTF-8 for text, raw for binary; `context-storage.ts:23`), so the
+  binary ceiling is ~1.8 MB of raw bytes. Binary still crosses RPC as canonical base64.
+- **`MAX_GIT_DIR_BYTES = 64 MB`** (`artifact-sync.ts:26`) is a *soft* cap on the packed repository
+  loaded into memory during clone/fetch — not on unpacked content. Clones are shallow and
+  single-branch (`depth: 1`); once the cached gitdir exceeds the budget it reclones shallow and logs
+  `artifacts.git.cache.transfer.budget.exceeded` (`:176`). History therefore does not accumulate
+  against it indefinitely.
+- Path length: 1024 characters (`MAX_DOCUMENT_PATH_LENGTH`, `context-collection.ts:30`).
 
 ### 3.4 Indexing — there is none
 
-`search()` (`context-collection.ts:598`) is a **linear scan with substring scoring**:
+`search()` (`context-collection.ts:617`, "Linear scan over one collection") is a **linear scan with
+substring scoring**:
 
 ```ts
 for (let record of this.storage.documents.list()) {
@@ -279,9 +288,11 @@ return results.slice(0, limit)   // default 20
 No embeddings, no vector search, no inverted index, no BM25, no stemming. Body matching is skipped
 entirely for non-text types, so **binary files are searchable by name and description only**.
 
-**Name is worth 10× a body hit; description 5×.** `description` is auto-extracted from YAML
-frontmatter for text files. Naming files well and writing real frontmatter descriptions is the
-highest-leverage thing available for retrieval quality.
+**Name is worth 10× a body hit; description 5×.** `description` is auto-extracted
+(`description-extractors.ts:82`–`110`): from a `description` or `summary` key in Markdown
+frontmatter; from a top-level `description`/`summary` key — or else the leading `#` comment block —
+in YAML; from `_comment`, `description` or `summary` in JSON. Naming files well and writing real
+descriptions is the highest-leverage thing available for retrieval quality.
 
 Practical consequences:
 
@@ -292,7 +303,7 @@ Practical consequences:
 
 ### 3.5 The agent's read path
 
-Three RPCs on `LibraryReadSession`, scoped to *enabled* collections:
+Three RPCs on `LibraryReadSession` (`library-read.ts:33`), scoped to *enabled* collections:
 
 | Call | Behaviour |
 |---|---|
@@ -300,15 +311,22 @@ Three RPCs on `LibraryReadSession`, scoped to *enabled* collections:
 | `search(query, {collectionId?, limit=20})` | Fans out, `MAX_COLLECTION_FANOUT = 8` concurrent |
 | `read(docId)` | Full document; binary as a `data:` URI |
 
-Above them sits the catalog: collections (against `AGENT_CATALOG_MAX_ENTRIES = 1000`) then up to 150
-skills. Entries carry the literal usage instruction `"Read with env[N].read(id) and
-console.log(document.content)"`.
-
 Every read/list/search is authorized as an **observation** and attributed to the collections it
-reveals. `read()` and `list()` deliberately record nothing when empty.
+reveals; all three record nothing when empty.
 
-**Git refresh is lazy** — `listContextDocuments`, `search`, and `listAgentSkills` each kick off a
-background refresh. After a `git push`, the update lands on a *subsequent* read.
+Above them sits the catalog: collections (against `AGENT_CATALOG_MAX_ENTRIES = 1000`) then up to 150
+skills. Skill entries — only those — carry the literal instruction `"Agent Skill. Read with
+env[N].read(id) and console.log(document.content)."`
+
+**The catalog is not an observation** (since #267, `library-gatekeeper.ts:321`). The Workshop loads
+it into every chat's prompt on every turn, so a skill added mid-chat is visible on the next turn,
+and nothing that needs observer verification may appear in it. Reading an item through the session
+is still an observation.
+
+**Git refresh is lazy** — `listAgentSkills`, `listContextDocuments`, `getContextDocument` (what
+`read()` uses) and `search` each kick off a background refresh, throttled to once a minute
+(`GIT_REFRESH_MIN_INTERVAL_MS`, `context-collection.ts:35`). After a `git push`, the update lands on
+a *subsequent* read. The Context UI's explicit sync is `syncContextCollectionArtifactSource`.
 
 ---
 
@@ -316,68 +334,77 @@ background refresh. After a `git push`, the update lands on a *subsequent* read.
 
 ### 4.1 What a blueprint is
 
-A snapshot of a gadget's **source code** (a Yjs document stripped of history), plus binding
-*requirements* and metadata. It does **not** capture SQLite storage, chat history, or credentials —
-only the *shape* of each binding.
+A snapshot of a gadget's **source at one git commit** — `Overseer.snapshotCode(commitId)`
+(`overseer.ts:8251`) reads the commit's files and packs them as a gzipped Yjs V2 snapshot with no
+history — plus binding *requirements* and metadata. It does **not** capture SQLite storage, chat
+history, or credentials — only the *shape* of each binding. Blueprint records reference a
+`commitId`; `codeVersion` survives only as a legacy field (`overseer.ts:561`–`582`).
 
-Blueprints cannot be authored as source files. A `.gadget` is a binary container built in a running
-Workshop and exported.
+User blueprints are still made in a running Workshop and exported as `.gadget` files. The bundled
+ones are now plain TypeScript source (§4.2).
 
-### 4.2 Extracting a built-in blueprint's source
+### 4.2 The bundled blueprints
 
-The three bundled formats live in `cloudflare-os/packages/workshop-backend/format-blueprints/`:
+They live in their own package, **`packages/bundled-blueprints/blueprints/<name>/`** (#466):
 
-| Archive | Blueprint ID | Sidecar |
+| Directory | Blueprint ID | Output |
 |---|---|---|
-| `workspace-docs.gadget` | `format.document` | `workspace-docs.json` |
-| `workspace-sheets.gadget` | `format.spreadsheet` | `workspace-sheets.json` |
-| `workspace-slides.gadget` | `format.slides` | `workspace-slides.json` |
+| `workspace-docs` | `format.document` | `document` / Docs / `fileText` |
+| `workspace-sheets` | `format.spreadsheet` | `spreadsheet` / Sheets / `table` |
+| `workspace-slides` | `format.slides` | `presentation` / Slides / `presentation` |
 
-Layout: 24-byte header (magic `0xec2e2d3a2300e317`, format version, metadata length, content
-length), JSON metadata, then a **gzipped Yjs V2 snapshot** of the files.
+These three are the only bundled blueprints; all declare `bindings: {}`. Each directory holds:
 
-> **Obsolete since pin `54d5d8b0`.** Upstream #265 unpacked the bundled blueprints: the `.gadget`
-> binaries are gone, replaced by one directory per blueprint holding a `blueprint.json` manifest and
-> reviewable sources under `files/` — read `format-blueprints/workspace-docs/files/server.js`
-> directly, no extraction needed. `scripts/build-format-blueprints.ts` reconstructs the archive
-> representation at build time, so `FORMAT_BLUEPRINTS_DIR` still works the same way for a fork
-> shipping its own set. The install fingerprint now also covers the generated archive's content
-> hash, not just `revision`. The header format below is retained because exported `.gadget` files
-> (the `/admin` export path) still use it.
+- `blueprint.json` — `blueprintId`, `title`, `description`, `output`, `author`, `revision`,
+  `created`, `version`, `lastUpdated`, `bindings`
+- `files/` — `README.md`, `client.ts`, `server.ts`, `lib/protocol.ts` (Sheets adds `lib/xlsx.ts`,
+  `lib/zip.ts`, `lib/formula.ts`)
+- optionally `__tests__/`, never part of the archive
 
-A working extraction script is at `scratchpad/extract-gadget.mjs`:
-`node extract-gadget.mjs <file.gadget> <output-dir>`.
+The TypeScript is bundled at build time into readable `client.js`/`server.js`, with two shared
+gadget libraries inlined: `libraries/ui` and `libraries/sync`, imported as
+`@gadgets/bundled-blueprints/libraries/<name>/client|server`. The build is
+`workshop-backend/scripts/build-bundled-blueprints.ts`, generating the gitignored
+`workshop-backend/src/generated/bundled-blueprints.ts`. The install fingerprint is
+`${blueprintId}@${revision}+${contentHash}+fingerprint([title, description, author, output])`
+(`workshop-backend/src/bundled-blueprints.ts:30`), so a content change reinstalls even without a
+`revision` bump.
 
-Workspace Docs decodes to three files — `server.js` (15,760 chars), `client.js` (71,254 chars),
-`README.md` (6,157 chars). Its declared bindings are `{}`, so it instantiates with no connections.
+**Workspace Docs' model.** Read `workspace-docs/files/server.ts` directly. It stores one atomic
+`document:v2` snapshot — title, global revision, ordered blocks — with concurrent edits serialized by
+a global revision number: block granularity, "not a character-level CRDT" (its `README.md:30`, `:64`).
+It builds on `libraries/sync/server`; read that before designing our own blueprints' sync.
 
-> **Correction to an earlier assumption.** There is **no Yjs runtime model** in the document
-> blueprint. Yjs is only how the blueprint *archive* stores source files. Workspace Docs' own README
-> describes its architecture as a Durable Object storing *"one atomic `document:v2` snapshot
-> containing the title, global revision, ordered blocks"*, with concurrent edits serialized by
-> chained mutations and a global revision number — a revision scheme, not a CRDT. Read that
-> `server.js` before assuming CRDT merge semantics.
+**The `.gadget` archive format** is still what `/admin` exports and the importer reads: a 24-byte
+header (magic `0xec2e2d3a2300e317`, u32 version = 1, u32 metadata length, u64 content length), JSON
+metadata (≤64 KiB), then the gzipped Yjs snapshot (≤32 MiB) — `workshop-backend/src/blueprint-archive.ts:3`–`21`.
+`scratchpad/extract-gadget.mjs` decodes one: `node extract-gadget.mjs <file.gadget> <output-dir>`.
 
 ### 4.3 Formats and the Outputs page
 
-A *format* is an ordinary blueprint the deployment has **promoted** (`AdminConfig.formats`, the
-admin **Formats** panel). A blueprint may declare `BlueprintMetadata.output`: a grouping `id`, a
-`noun`/`plural`, and an `icon` from a closed set.
+A *format* is an ordinary blueprint the deployment has **promoted** (`AdminConfig.formats`,
+`admin-config.ts:62`; the admin **Formats** panel). Each `FormatCuration` (`:69`) carries `enabled`,
+an optional `agentHint`, and optional `overrides: Partial<BlueprintOutput>` — presentation the
+deployment substitutes for the blueprint's own ("an org that calls its decks *Briefings*"), without
+touching the blueprint.
+
+A blueprint may declare `BlueprintMetadata.output` (`workshop-shared/src/api.ts:4274`): a grouping
+`id`, a `noun`/`plural`, and an `icon` from a closed set (`api.ts:1546`):
 
 ```ts
 export const OUTPUT_ICONS = ["fileText", "gridNine", "presentation", "appWindow", "flowArrow",
     "kanban", "chartBar", "table", "notebook", "listChecks"] as const;
 ```
 
-**Outputs filter chips** are built in `routes/outputs.tsx:530` in three passes:
+**Outputs filter chips** are built in `workshop-frontend/src/routes/outputs.tsx:530` in three passes:
 
 1. `Apps` seeded first, unconditionally
 2. Each promoted format, in deployment order
 3. Any `output.id` present on existing outputs but not yet covered — *"so existing outputs never
    lose their filter"* when a format is later un-promoted
 
-Chips are keyed by `output.id`, labelled by `output.plural`; they render only when more than one
-exists. `All` is separate and always shown.
+Chips are keyed by `output.id`, labelled by `output.plural`. The whole row — `All` included —
+renders only when more than one type exists (`:541`, `:592`).
 
 **"Apps" is `GENERIC_OUTPUT`** (`components/format/formats.ts:59`):
 
@@ -391,19 +418,23 @@ format newer than the browser's cached bundle.
 
 ### 4.4 Shipping our own formats
 
-Two routes. **Path A was chosen for this iteration.**
+Two routes. **Path A is the plan.**
 
 **A. Promote via `/admin` → Formats.** No code, no redeploy. Chips appear automatically from
 `output.id` / `output.plural`. This is the mechanism bundling is a convenience on top of.
 
 **B. Bundle as data.**
-`FORMAT_BLUEPRINTS_DIR=<dir> pnpm import:format-blueprint <export.gadget> --new <id>` writes the
-`.gadget` + `.json` pair and regenerates the bundled module. Caveats:
+`BUNDLED_BLUEPRINTS_DIR=<dir> pnpm import:bundled-blueprint <export.gadget> --new <name>` scaffolds a
+blueprint directory (`<export.gadget> <blueprintId>` updates an existing one) and regenerates the
+bundled module. Caveats:
 
-- `FORMAT_BLUEPRINTS_DIR` **replaces** the default set — Docs/Sheets/Slides are lost unless copied
-  across.
-- The directory must live in *this* repo, not the submodule; upstream warns that adding files there
-  conflicts on every gitlink bump.
+- `BUNDLED_BLUEPRINTS_DIR` **replaces** the default set — Docs/Sheets/Slides are lost unless copied
+  across. The old `FORMAT_BLUEPRINTS_DIR` name is **no longer read**: a deployment still setting it
+  silently builds the default set.
+- It resolves against `packages/workshop-backend`, and a tree placed there is bundled but not
+  type-checked. Importing over a TypeScript blueprint replaces its sources with the built JavaScript.
+- The directory must live in *this* repo, not the submodule; adding files there conflicts on every
+  gitlink bump.
 - Needs wiring into `buildCommands()` in `scripts/deploy.ts` (same shape as `VITE_CF_ACCESS_MODE`).
 - `blueprintId` is the install key. Changing it after deploy promotes a **second** format and
   orphans the first. Rename files freely; never the id.
@@ -417,21 +448,26 @@ generic (`board`, not `veeros-kanban`) since it is the Outputs grouping key.
 ## 5. Theming and CSS
 
 **There is no CSS customization hook** — documented or otherwise. Verified: no
-`customCss`/`injectCss`/`themeCss` anywhere; the frontend's only `VITE_*` variables are
-`BACKEND_HOST`, `CF_ACCESS_MODE`, `DEV_*`, `FRONTEND_ERROR_REPORTING`; and this repo's
-`vite.config.ts` is lint-only and explicitly ignores `cloudflare-os/**`.
+`customCss`/`injectCss`/`themeCss`/`customStyles` anywhere; the frontend's only `VITE_*` variables
+are `BACKEND_HOST`, `CF_ACCESS_MODE`, `DEV_AUTO_LOGIN`, `DEV_PASSWORD`, `DEV_USERNAME`,
+`FRONTEND_ERROR_REPORTING`; and this repo's `vite.config.ts` is lint-only and explicitly ignores
+`cloudflare-os/**`.
 
 The complete admin visual surface is `setSiteName`, `setSiteLogo`, `setAccentColor`,
-`setAnnouncement`, `setBanner`.
+`setAnnouncement`, `setBanner` (`workshop-backend/src/admin-settings.ts:586`–`633`).
 
-`setAccentColor` is more capable than it sounds: one validated hex seed expands through
-`accentVariables()` into a family of custom properties (`--color-accent-100/200`,
-`--color-shadow-accent-*`) set on `document.documentElement`; an empty/invalid value removes them,
-falling back to `styles.css` defaults (`#ff4801` light, `#b84e00` dark). It also propagates into
-sandboxed Gatekeeper configurator UIs via `updateTheme`.
+`setAccentColor` is more capable than it sounds: one validated `#rgb`/`#rrggbb` seed expands through
+`accentVariables()` (`workshop-shared/src/theme.ts:22`) into `--color-kumo-brand(-hover)`,
+`--color-accent-100/200`, `--text-color-kumo-brand`, `--text-color-kumo-link` and
+`--color-selection-bg/-text`, set on `document.documentElement`. Kumo's own brand colour therefore
+follows it. An empty/invalid value removes them, falling back to `styles.css` defaults (`#ff4801`
+light, `#b84e00` dark). The `--color-shadow-accent-*` values are static and do not follow the seed.
+It also propagates into sandboxed Gatekeeper UIs via `updateTheme` (`SandboxedGatekeeperApp.tsx:160`).
 
 Everything else is Cloudflare's **Kumo** design system (`bg-kumo-base`, `text-kumo-subtle`,
-`border-kumo-line`) with light/dark palettes keyed off `data-mode`. No override hook.
+`border-kumo-line`) with light/dark palettes keyed off `data-mode`. No override hook. The new
+`@gadgets/ui` package (#484) is a shared React component layer (currently one `HierarchicalList`),
+not a theming hook, and nothing imports it yet.
 
 **Gadget code is unconstrained** — Basecamp-5 styling in our own blueprints is entirely ours. Only
 the Workshop chrome is fixed.
@@ -448,35 +484,65 @@ Three independent layers:
 | Global tier | **Two only**: admin / everyone else | `access.admins` |
 | Per-workspace role | **Three**: owner > build > use | Workspace owner |
 
-No third global tier, no custom roles. Admin is a flat boolean from `ADMINS` (`server.ts:100`).
+No third global tier, no custom roles. Admin is a flat boolean from `ADMINS` (`#isAdmin()`,
+`server.ts:121`).
 
 ### Per-workspace roles
 
+In code the roles are `build` > `use`, with the owner as the implicit `build` root
+(`workshop-backend/src/sharing.ts:33`).
+
 - **`use`** — render and interact with the deployed UI, read `id`/`title`/`owner`/`role`, see
   presence. Everything else throws `Unauthorized`. Default-deny by construction:
-  `UseOverseerInterface` *implements* `Overseer`, so a new method fails to compile until someone
-  decides whether `use` may call it.
+  `UseOverseerInterface` (`overseer.ts:12223`) *implements* `Overseer`, so a new method fails to
+  compile until someone decides whether `use` may call it.
 - **`build`** — full access except: cannot delete (owner only); uses **their own** AI models (BYOK
   bills whoever prompted); uses **their own** connected accounts for bindings.
 
-Effective role is recomputed live from a permission graph at every `open()`. Revocation is lazy —
-severing an edge is enough — and removals abort the workspace DO after flushing, so an open session
-dies within ~100 ms rather than lingering.
+Effective role is recomputed live from a permission graph at every `open()`
+(`authorizeCollaborator`, `overseer.ts:9379`), which for a non-owner also re-verifies them as an
+observer of every in-scope gatekeeper. Revocation is lazy — severing an edge is enough — and
+removals abort the workspace DO after flushing (`scheduleAccessRestart`, `overseer.ts:6328`), so an
+open session dies within ~100 ms rather than lingering.
+
+Two workspace latches can narrow sharing permanently, both set by a gatekeeper observation —
+restricted data and owner-invites-only (§8.2). Once owner-invites-only is set, share links can no
+longer be created, copied or redeemed, and only the owner can add collaborators.
 
 ### What is not possible
 
-**Gadget creation cannot be restricted.** `newGadget()` (`server.ts:282`) has no role check; any
+**Gadget creation cannot be restricted.** `newGadget()` (`server.ts:319`) has no role check; any
 authenticated user can create a workspace. There is no per-user capability flag.
 
 Membership is the lever instead: Access policy decides who reaches the app, and
 `setSignupsEnabled(false)` makes a first-time Access-authenticated visitor **rejected** rather than
-auto-provisioned (`user.ts:328`), while existing accounts keep working. Pattern: let each person
-sign in once with signups on, then close it.
+auto-provisioned (`authenticateFromCfAccess`, `user.ts:437`: *"New sign-ups are currently disabled
+on this deployment."*), while existing accounts keep working. Pattern: let each person sign in once
+with signups on, then close it.
+
+### User directory and search
+
+New at `ef65348f` (#474). A singleton `UserDirectoryDurableObject` (`user-directory.ts:14`) holds
+`{id, name}` for every user, and the share modal can search it:
+
+- **Any authenticated user** can call `searchUsers(query)` (`server.ts:150`): case-insensitive
+  substring match on id and display name, 10 results, caller excluded.
+- **Results reveal ids — which on an Access deployment are email addresses.**
+- The directory fills lazily: a user is added on their next sign-in or display-name change, not by
+  a backfill. People who never sign in again never appear.
+- Gated by `AdminConfig.userSearchEnabled`, toggled in `/admin` (`setUserSearchEnabled`). While off,
+  search returns `[]` and invite-by-exact-email still works. The policy is cached for 30 s per API
+  session.
+- **The default is a trap.** When the stored config has no value, `normalizeAdminConfig` uses
+  `!signupsEnabled` (`admin-config.ts:314`). A deployment that closed signups — ours, per the
+  pattern above — therefore gets search **on** at the first request after upgrade. The derived value
+  is frozen into storage at the next admin write of any setting.
 
 ### Upstream roadmap
 
-`docs/sharing.md` future work lists chat-only and read-only permission levels, resharing of `use`,
-binding-aware access control, and share-link expiry.
+`docs/sharing.md` future work (`:187`) lists chat-only and read-only permission levels, resharing
+of `use`, binding-aware access control, share-link expiry, un-revoking share links, GC of dead
+records, and notifications.
 
 ---
 
@@ -492,16 +558,20 @@ Three, and `CF_ACCESS_AUD` is a **master switch**, not a preference.
 
 With `CF_ACCESS_AUD` set:
 
-1. Every `/api` request needs a valid Access JWT plus a same-origin check (`server.ts:839`)
-2. `login()` and `createAccount()` **throw unconditionally** (`server.ts:719`, `:743`) — password
+1. Every `/api` request needs a same-origin `Origin` (else 403 *"Cross-origin API access not
+   allowed."*) and a valid Access JWT carrying an email (`server.ts:899`–`911`)
+2. `login()` and `createAccount()` **throw unconditionally** (`server.ts:778`, `:801`) — password
    auth is refused, not merely hidden
-3. `VITE_CF_ACCESS_MODE` is a **build-time constant**, so the login UI is not in the bundle
+3. `VITE_CF_ACCESS_MODE` is a **build-time constant** (`workshop-frontend/src/useAuth.ts:6`), set by
+   our `buildCommands()`. That the login UI is then tree-shaken out of the bundle is expected but
+   not verified.
 
 Gatekeeper *sign-in* has no server-side guard but is unreachable in Access mode. A Gatekeeper used
 as an ordinary **connector** works fine.
 
-**Identity is always the verified email** — all three key the account by `idFromName(email)`, so
-switching methods does not strand data.
+**Identity.** Access and gatekeeper sign-in both key the account by `idFromName(email)`, so switching
+between them does not strand data. Password accounts are a separate identity space: they key by a
+normalized username (`^[a-z][a-z0-9_]*$`, `user.ts:2120`), which can never be an email.
 
 ### Configuring the alternatives
 
@@ -511,12 +581,15 @@ DISABLE_PASSWORD_AUTH=true                  # optional, OAuth-only
 ```
 
 Only `cloudflare`, `github`, `google` advertise `providesAuth`. `DISABLE_PASSWORD_AUTH` is ignored
-unless the allowlist is non-empty — a deliberate anti-lockout guard. OAuth credentials live as
-secrets on the **gatekeeper Workers**; redirect URIs are
-`https://os.veer.studio/gatekeeper/<vendor>/oauth`.
+unless the allowlist is non-empty — a deliberate anti-lockout guard (`auth/config.ts:30`). OAuth
+credentials live as secrets on the **gatekeeper Workers**; redirect URIs are
+`https://os.veer.studio/gatekeeper/<vendor>/oauth`. Closing signups also blocks first-time gatekeeper
+sign-in.
 
-Sign-in requests minimal scopes and the grant **self-destructs** after the email is read; full scopes
-come only on explicit connect.
+Sign-in requests minimal scopes and the grant **self-destructs** after the email is read — except
+Cloudflare, which requests full scopes and keeps the grant as a connected account
+(`server.ts:714`; `auth/login-flow.ts:233`). Completion uses the same ticket-plus-nonce handoff as
+connects (§13.2).
 
 **This repo hard-codes Access mode** — no `AUTH_GATEKEEPERS` support exists in `scripts/` or
 `deployment.jsonc`. `docs/customization.md:83-84` states both alternatives require deploy script
@@ -526,34 +599,50 @@ changes.
 
 ## 8. The Gatekeeper contract
 
-**`cloudflare-os/packages/workshop-shared/src/gatekeeper.ts`** (1283 lines, ~63 KB), exported as
+**`cloudflare-os/packages/workshop-shared/src/gatekeeper.ts`** (1717 lines, ~86 KB), exported as
 `@gadgets/workshop-shared/gatekeeper`. This is the whole contract — every Gatekeeper in the repo
-implements interfaces declared in this one file.
+implements interfaces declared in this one file. Since `54d5d8b0` much of the *convention* around it
+is also library code in `gatekeeper-kit` (connect flows, credentials, OAuth, actions, observations,
+simulation); a new Gatekeeper should start there.
 
 ### 8.1 The export map
 
 | Export | Line | Role |
 |---|---|---|
-| `GatekeeperVendor` | 445 | What the Workshop binds — `describe()`, `connectAccount()`, `createAccount()` |
-| `GatekeeperUser` | 567 | Per-user surface once connected |
-| `Gatekeeper<Session>` | 698 | The DO holding a connection |
-| `GatekeeperConnectCallback` | 525 | OAuth completion |
-| `GatekeeperUserVerifier` | 689 | Observer verification |
+| `GatekeeperVendor` | 469 | What the Workshop binds — `describe()`, `connectAccount()`, optional `createAccount()` |
+| `GatekeeperConnectCallback` | 559 | Connect completion — `complete()` returns a `ConnectHandoff` (464) |
+| `GatekeeperUser` | 621 | Per-user surface once connected; includes `commitReconnect(stageId)` (693) |
+| `GatekeeperUserVerifier` | 766 | Observer verification |
+| `Gatekeeper<Session>` | 775 | The DO holding a connection |
 
-Supporting vocabulary: `VendorDescription` (38), `AccountDescription` (148), `ResourceDescription`
-(185), `SupportedResource` (236), `AgentCatalog` (105) with caps at 125–128
+Supporting vocabulary: `VendorDescription` (39), `AccountDescription` (151), `ResourceDescription`
+(188), `SupportedResource` (239), `AgentCatalog` (108) with caps at 128–131
 (`AGENT_CATALOG_MAX_ENTRIES = 1000`, id 256, title 100, description 400), `ObservationAuthorizer`
-(855), `ObservationDescription` (1049), `ApprovalQueue` (934), `SlashCommandProvider` (908),
-`ActionDescription` (1129), `ActionKind` (1117), `HookController`/`HookInitiator` (1244, 1273),
-`GatekeeperUiFrame` (414), `ResourceConfiguratorIframe`/`Host` (348, 372).
+(973, now also `getGitCache()` at 997), `ObservationDescription` (1178), `ApprovalQueue` (1063),
+`SlashCommandProvider` (1037), `ActionDescription` (1317), `ActionKind` (1305), `ActionField` (1265),
+`HookController`/`HookInitiator` (1479, 1505), `GatekeeperUiFrame` (419),
+`ResourceConfiguratorIframe`/`Host` (351, 375).
 
-Authoring guide: `cloudflare-os/.agents/skills/write-gatekeeper/SKILL.md` (343 lines) plus
-`SKELETON.md`.
+Members added since `08afe059` worth knowing:
+
+| Member | Line | Meaning |
+|---|---|---|
+| `ActionDescription.fields`, `ObservationDescription.fields` | 1334, 1190 | Typed values (`inline`, `text`, `json`, `list`, `file`) the approver sees literally rather than through Markdown |
+| `ActionDescription.descriptionIsComplete` | 1347 | Claim that description + fields reproduce verbatim everything the action writes or sends. Never true for a git push |
+| `ObservationDescription.ownerInvitesOnly` | 1235 | Latches the workspace to owner-added collaborators only (§8.2) |
+| `getAgentCatalog?()` | 830 | No longer takes an authorizer; a catalog is not an observation |
+
+Authoring guide: `cloudflare-os/.agents/skills/write-gatekeeper/SKILL.md` (345 lines) plus
+`SKELETON.md` (638 lines). Agent-facing `types.d.ts` files must now be self-contained — no imports
+except `cloudflare:workers` — enforced by the `gadgets/self-contained-agent-types` lint rule (#581,
+#582), because they reach the agent as-is and it cannot follow imports. One stale sentence: the
+SKILL's observer strategy A (`:248`) says restricted mode "blocks all actions"; the contract
+(`gatekeeper.ts:1210`–`1215`) and §8.2 are current.
 
 ### 8.2 Sessions and the ApprovalQueue
 
 The ApprovalQueue is not something a session looks up. It is **the argument that creates the
-session** (`gatekeeper.ts:738`):
+session** (`gatekeeper.ts:815`):
 
 ```ts
 startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<Session>;
@@ -562,25 +651,28 @@ startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<Session>;
 Every channel the session has back to the platform arrives through that one stub. There is no
 ambient path.
 
-**The chain, from a binding name in `env` to a row in the audit log:**
+**The chain, from a binding name in `env` to a row in the audit log** (all `overseer.ts`):
 
-1. **`GatekeeperLoopback`** (`workshop-backend/src/overseer.ts:7088`) — a dynamic isolate's `env` can
-   hold `ServiceStub`s but not `RpcStub`s, so each binding is a `WorkerEntrypoint` whose
-   *constructor* opens the session and returns a `Proxy` over it. Its own comment calls this a
-   "horrible hack". Props carry `{overseerId, target, caller}`.
-2. **`startGatekeeperSession(target, caller)`** (`overseer.ts:2774`) → builds a
-   `GatekeeperClientImpl`, calls `openSession()`.
-3. **`openSession()`** (`overseer.ts:9666`):
+1. **`GatekeeperLoopback`** (`:10422`) — a dynamic isolate's `env` can hold `ServiceStub`s but not
+   `RpcStub`s, so each binding is a `WorkerEntrypoint` whose *constructor* opens the session and
+   returns a `Proxy` over it. Its own comment calls this a "horrible hack" (`:10411`). Props carry
+   `{overseerId, target, caller}`.
+2. **`startGatekeeperSession(target, caller)`** (`:5551`) → builds a `GatekeeperClientImpl`, calls
+   `openSession()`.
+3. **`openSession()`** (`:12919`) first calls `assertGatekeeperUsable` — refusing a connection that
+   is pending a scope-widening restart — then:
    ```ts
    return this.facet.startSession(new ApprovalQueueImpl(this.impl, this.id, this.caller));
    ```
-4. **`ApprovalQueueImpl`** (`overseer.ts:9695`) is ~15 lines. It captures `{impl, gatekeeperId,
-   caller}` and forwards three methods. **The entire security value of the object is the two fields
-   it closes over** — which gatekeeper, and on whose behalf.
-5. **`getGatekeeperFacet(id)`** (`overseer.ts:2657`) resolves the gatekeeper as a **Durable Object
-   Facet** (`ctx.facets.get('gatekeeper<id>')`) — a child DO of the Overseer, not a separate service.
+4. **`ApprovalQueueImpl`** (`:13013`–`13045`) closes over `{impl, gatekeeperId, caller, hookId?}`
+   and forwards four methods: `authorizeObservation`, `getGitCache`, `submitAction`, `bindHook`. A
+   queue minted for a hook re-checks that the hook is still live before every call. **The entire
+   security value of the object is the fields it closes over** — which gatekeeper, and on whose
+   behalf.
+5. **`getGatekeeperFacet(id)`** (`:5336`) resolves the gatekeeper as a **Durable Object Facet**
+   (`ctx.facets.get('gatekeeper<id>')`) — a child DO of the Overseer, not a separate service.
 
-`GatekeeperCaller` (`overseer.ts:7047`) is the provenance stamped on every record:
+`GatekeeperCaller` (`:10369`) is the provenance stamped on every record:
 
 ```ts
 {from:"agent", chatId} | {from:"gadget", chatId?, gadgetId?} | {from:"user", chatId?} | {from:"hook"}
@@ -592,26 +684,45 @@ ambient path.
 |---|---|---|---|
 | Blocks on a human? | **never** | never (returns at once) | never |
 | Record state | `"approved"` | `"pending"` | `"approved"`, `enabled:false` |
-| Can throw? | **yes — this is the gate** | only on plumbing failure | — |
+| Can throw? | **yes — `excludeObservers`** | on a removed connection, a restricted git push, or plumbing failure | — |
 | Decided later by | — | `applyAction` / `rejectAction` | `enableHook` |
 
-`authorizeObservation` is the one that surprises people: in the normal case it is **logged, not
-gated**. It writes an already-approved audit row (`overseer.ts:2860`) and returns. It throws in
-exactly two situations (`overseer.ts:2839-2858`):
+`authorizeObservation` (`:5671`–`5739`) is the one that surprises people: it is **logged, not
+gated**. It writes an already-approved audit row (`:5698`) and returns. It throws in one situation:
 
-- **`prohibitAllSharing`** — if the workspace already has shares, the read is refused. Otherwise the
-  flag is *latched on the workspace*: permanent lockdown, no further actions (`overseer.ts:3051`)
-  and no web fetches (`getWebFetchEnv`, `overseer.ts:3010`).
-- **`excludeObservers`** — `#enforceExcludeObservers` maps each opaque observer id back to a
-  profile; if any named observer is still authorized in the sharing graph the read is blocked,
-  because v1 has no per-thread hiding.
+- **`excludeObservers`** — each opaque observer id is mapped back to a profile; the read is blocked
+  if a named observer is still authorized *and* the gatekeeper is within their role's verification
+  scope (`:5832`–`5890`). An out-of-scope `use` observer is de-registered from that gatekeeper
+  instead; an unauthorized one is torn down.
+
+It can also **latch** the workspace, permanently:
+
+- **`containsRestrictedData`** (`:1159`–`1163`; the storage key is still `"prohibitAllSharing"`).
+  Nothing is refused at observe time. From then on the workspace is in **restricted mode** (#487):
+  - collaborators are admitted only while verified as observers of the producing gatekeeper,
+    re-checked at every `open()`;
+  - public web fetches are refused (`getWebFetchEnv`, `:5911`);
+  - **nothing auto-approves**, so every action pends for manual approval, and the approver sees the
+    full text with a notice that they are responsible for checking it contains no restricted data;
+  - **git pushes are refused outright** (`:5970`–`5980`) — "a git push cannot be reviewed as of yet".
+
+  This replaced the original lockdown, under which one restricted observation refused every action.
+  The kernel does not restrict *which* connections may be acted on (`gatekeeper.ts:1221`).
+- **`ownerInvitesOnly`** (#523, `:5694`). Roles are snapshotted first; anyone who loses access
+  (link joiners, transitive collaborators) is restarted out. Share links can no longer be created,
+  copied or redeemed, and only the owner can add people. No shipping gatekeeper sets it yet; Google
+  BigQuery sets `containsRestrictedData`.
+
+Separately, **`descriptionIsComplete`** (#541) never refuses anything: an incomplete description is
+accepted and flagged to the approver on every approval surface.
 
 #### Two independent action-ID spaces
 
 - The **gatekeeper** assigns its own action number (`counter:nextActionId` in its own DO —
-  `gatekeeper-homeassistant/src/homeassistant.ts:1386`).
-- The **overseer** assigns a separate `actionId` for the audit row (`overseer.ts:3060`).
-- `applyAction(record.action)` passes the **gatekeeper's** number back (`overseer.ts:2676`). The
+  `gatekeeper-homeassistant/src/homeassistant.ts:1420`).
+- The **overseer** assigns a separate `actionId` for the audit row (`submitAction`, `:5955`; id at
+  `:5991`).
+- `applyAction(record.action, gitCache)` passes the **gatekeeper's** number back (`:5380`). The
   overseer's id never crosses the boundary.
 
 This is why every gatekeeper keeps `pending:<id>` rows: the callback carries only an integer, so all
@@ -619,84 +730,88 @@ context must be recoverable from local storage.
 
 #### Approve and reject
 
-`applyPendingAction` (`overseer.ts:2671`) is the single chokepoint to `state:"approved"`:
+`applyPendingAction` (`:5374`) is the single chokepoint to `state:"approved"`:
 
 ```ts
 async applyPendingAction(record, resolvedBy: AiChatAuthorInfo, autoApproved: boolean)
 ```
 
 `resolvedBy` and `autoApproved` are **required, not defaulted** — a deliberate design note in the
-comment: no apply path can omit how the gate was cleared. `approveAction` (`overseer.ts:7826`)
-resolves the approver's profile *before* applying, so a failed profile fetch can't leave an action
-applied in the world but `"pending"` in storage.
+comment: no apply path can omit how the gate was cleared. `approveAction` (`:11158`) resolves the
+approver's profile *before* applying, so a failed profile fetch can't leave an action applied in the
+world but `"pending"` in storage.
 
-**Auto-approval requires two independent gates** (`overseer.ts:3086`) — the gatekeeper author's
-per-action `autoApprovable` verdict, *and* the workspace's opt-in rule keyed on
-`actionKind.tag`:
+**Auto-approval requires three conditions**, now in one function (`autoApprovalRule`,
+`workshop-backend/src/auto-approval.ts:29`–`37`): the gatekeeper author's per-action
+`autoApprovable === true`, the workspace's opt-in rule for `${gatekeeperId}:${actionKind.tag}`, and
+no restricted-data latch.
 
-```ts
-let willAutoApprove = !!(description.autoApprovable && description.actionKind &&
-    this.storage.autoApproveTags.get(`${gatekeeperId}:${description.actionKind.tag}`) !== undefined);
-```
-
-`drainAutoApprovals` applies in ascending id order and **stops at the first non-eligible pending
-action** — never skipping ahead of a human gate. `getAutoApprovableActions()` (`gatekeeper.ts:721`)
-exists so a pre-approval UI can list what *could* be auto-applied before any action exists.
+`drainAutoApprovals` (`:5403`) applies in ascending id order and **stops at the first non-eligible
+pending action** — never skipping ahead of a human gate. `getAutoApprovableActions()`
+(`gatekeeper.ts:798`) exists so a pre-approval UI can list what *could* be auto-applied before any
+action exists.
 
 #### `awaitDecision`: suspending the agent turn
 
 ```ts
-// overseer.ts:3092
+// overseer.ts:6024
 if (caller.from === "agent" && description.awaitDecision && !willAutoApprove) {
   this.#getOrCreateCapturedActions(caller.chatId).awaitDecision = true;
 }
 ```
 
-`#maybeResumeAfterActionDecision` (`overseer.ts:7930`) walks the chat log back to the turn boundary
-and resumes **only if every awaited action in that turn was decided and all were approved**. One
-denial leaves the turn ended. On resume it injects: *"The changes you submitted have been approved
-and applied: … Reads now reflect them."*
+`#maybeResumeAfterActionDecision` (`:11263`) walks the chat log back to the turn boundary and
+resumes **only if every awaited action in that turn was decided and all were approved**. One denial
+leaves the turn ended. On resume it injects: *"The changes you submitted have been approved and
+applied: … Reads now reflect them."*
 
 #### Hooks — the fourth caller, with no human present
 
-`bindHook` stores the controller plus the **persistent** callback stub (`overseer.ts:3097`);
-persistence is required because sessions die, explained at length at `gatekeeper.ts:960-1040`. On
-`enableHook` the overseer hands the gatekeeper a `GatekeeperHookLoopback` implementing
-`HookInitiator`. At fire time (`overseer.ts:6913`):
+`bindHook` (`:6034`) stores the controller plus the **persistent** callback stub; persistence is
+required because sessions die, explained at length in its doc comment (`gatekeeper.ts:1088`–`1175`).
+On `enableHook` the overseer hands the gatekeeper a `GatekeeperHookLoopback` (`:10464`) implementing
+`HookInitiator`. At fire time, `startHook` (`:10217`–`10245`) returns:
 
 ```ts
-return {
-  callback: record.callback,
-  approvalQueue: new ApprovalQueueImpl(this.impl, record.gatekeeperId, {from: "hook"}),
-};
+{
+  callback: makeHookFiringCallback(this.impl, hookId),   // re-validates on every call
+  approvalQueue: new ApprovalQueueImpl(this.impl, record.gatekeeperId, {from: "hook"}, hookId),
+}
 ```
 
-A fresh ApprovalQueue materializes for an event nobody triggered. `startHook` re-checks
-`record.enabled` and the admin's `disabledGatekeepers` list, so disabling takes effect on live hooks.
+A fresh ApprovalQueue materializes for an event nobody triggered. The callback is a proxy that
+re-checks the hook on each call rather than the raw stored stub. `startHook` itself re-checks the
+hook before and after its storage read, plus the admin's `disabledGatekeepers` list and
+`ambientGatekeeperMode === "disabled"`, so disabling takes effect on live hooks.
 
-**Known race, documented upstream** (`overseer.ts:7889`): a concurrent `disableHook` can land its
-`controller.disable()` before an in-flight `enable()`, letting the enable resurrect gatekeeper-side
-state that keeps consuming alarms and quota. Live firings stay safe; the orphaned row does not get
-cleaned up.
+**Known race, documented upstream** (`TODO(hooks)` in `enableHook`, `:11221`): a concurrent
+`disableHook` can land its `controller.disable()` before an in-flight `enable()`, letting the enable
+resurrect gatekeeper-side state that keeps consuming alarms and quota until cleaned up. Live firings
+stay safe.
 
 #### Flows this architecture supports
 
 1. **Read-only ambient** — Context Library; `applyAction` throws `"read-only and implements no
-   actions"` (`gatekeeper-context/src/library-gatekeeper.ts:355`).
+   actions"` (`gatekeeper-context/src/library-gatekeeper.ts:351`).
 2. **Read + queued writes, simulated** — HA, GitHub, Notion, Linear, Google, Spotify, Confluence.
-3. **Read + queued writes, not simulated** — Supabase, MCP portal; both set `awaitDecision: true`.
+3. **Read + queued writes, not simulated** — Supabase, MCP (both the per-user gatekeeper and the
+   portal); both set `awaitDecision: true`.
 4. **Auto-approved kinds** — applied without a prompt, still logged with `autoApproved: true` and
    `resolvedBy` = whoever enabled the rule.
 5. **Hook-driven** — Scheduler, Slack. Event → `startHook()` → new queue → `authorizeObservation` →
    deliver to gadget.
 6. **Slash commands — deliberately attenuated.** `SlashCommandProvider.invoke()` receives a
-   `SlashCommandAuthorizerImpl` (`overseer.ts:9683`) implementing *only* `ObservationAuthorizer`.
-   It structurally cannot submit actions or bind hooks. Same attenuation for `getAgentCatalog`.
-7. **Lockdown** — one `prohibitAllSharing` observation makes the workspace read-only for good.
+   `SlashCommandAuthorizerImpl` (`:12940`) implementing *only* `ObservationAuthorizer`
+   (`authorizeObservation`, `getGitCache`). It structurally cannot submit actions or bind hooks.
+   `getAgentCatalog()` now gets nothing at all — a catalog is a discovery index, not a read.
+7. **Restricted mode** — one `containsRestrictedData` observation: verified collaborators only, no
+   public web fetches, every action manually approved, no git pushes.
+8. **Owner-invites-only** — one `ownerInvitesOnly` observation: direct owner grants only, no share
+   links.
 
 ### 8.3 "Simulating actions"
 
-The contract *suggests* it (`gatekeeper.ts:730`):
+The contract *suggests* it (`gatekeeper.ts:808`–`813`):
 
 > It is **suggested** that the gatekeeper "simulate" actions that have not been approved yet […]
 > That said, there is **no strict requirement**.
@@ -704,27 +819,29 @@ The contract *suggests* it (`gatekeeper.ts:730`):
 It is a recommendation, and `awaitDecision` is the sanctioned opt-out.
 
 **Why it exists.** `submitAction` returns immediately but the write does not happen — possibly for
-days. Without simulation an agent writes, reads back, sees its write missing, and starts "retrying,
-second-guessing, or undoing its own work" (`gatekeeper.ts:1160`).
+days. Without simulation an agent writes, reads back, sees its write missing, and starts
+"re-trying, second-guessing, or undoing its own work" (`gatekeeper.ts:1393`).
 
 **How it is implemented — overlay at read time.** Home Assistant is the reference. Nothing is ever
 mutated; pending actions are folded over real state on each read.
 
-Write path (`homeassistant.ts:1286`) — store first, submit second, roll back the row if submit fails:
+Write path (`submitWrite`, `homeassistant.ts:1319`–`1352`, simplified) — store first, submit second,
+roll back the row if submit fails. Between the two it fetches the entity registry to describe the
+action:
 
 ```ts
 const id = self.#nextActionId();
 self.ctx.storage.kv.put<PendingActionRow>(`pending:${id}`, { id, action, submittedAt: Date.now() });
 try {
-  await approvalQueue.submitAction(id, description);
+  await approvalQueue.submitAction(id, describeAction(action, registry));
 } catch (e) {
   self.#deletePending(id);   // queue stub gone — don't leave a phantom
   throw e;
 }
 ```
 
-Read path (`homeassistant.ts:2714`) — note the short-circuit that keeps the common case at one
-round-trip:
+Read path (`getState()`, `homeassistant.ts:2748`) — note the short-circuit that keeps the common case
+at one round-trip:
 
 ```ts
 const pending = this.#ctx.listPendingActions();
@@ -746,31 +863,33 @@ await this.#ctx.approvalQueue.authorizeObservation({
 `pendingSuffix(appliedCount)` is the honest part: **the approver is told how much of what the agent
 read was imaginary.**
 
-`overlayEntityState` (`simulation.ts:327`) is a pure fold; `applyServiceToState` (`simulation.ts:68`)
+`overlayEntityState` (`simulation.ts:328`) is a pure fold; `applyServiceToState` (`simulation.ts:69`)
 is a `switch` over `${domain}.${service}` that **returns the input unchanged for anything it does not
 recognise** — scripts, scenes, templates, custom integrations. `indexPendingByEntity`
-(`simulation.ts:302`) makes a list read O(actions-for-that-entity) instead of O(all-actions) per row.
+(`simulation.ts:303`) makes a list read O(actions-for-that-entity) instead of O(all-actions) per row.
 
-**GitHub goes further: provisional IDs** (`gatekeeper-github/storage-schema.md:153`). Creates
-synthesize a local issue/PR object until GitHub assigns a real one; rejecting a provisional create
-deletes dependent pending actions and returns `restart: true` (`github.ts:3493`).
+**GitHub goes further: provisional IDs** (`gatekeeper-github/storage-schema.md:9`, `~1`, `~2`, …).
+Creates synthesize a local issue/PR object until GitHub assigns a real one; rejecting a provisional
+create deletes dependent pending actions and returns `restart: true` (`github.ts:4053`; a rejected
+push cascades to dependent PRs at `:4065`).
 
 That is the cost of simulation, made explicit. HA can reject silently because its overlay is
 *derived* from `pending:*` — delete the row and the simulation evaporates. GitHub cannot: the gadget
-holds a provisional number that will never exist, so the gadget must restart. Eight gatekeepers
-return `{restart: true}` on some rejection path.
+holds a provisional number that will never exist, so the gadget must restart. Six gatekeeper
+packages (GitHub, Notion, Linear, Google incl. Gmail, Confluence, Spotify) return `{restart: true}`
+on some rejection path.
 
 **The opt-out, stated plainly in both places:**
 
 ```ts
-// gatekeeper-supabase/src/supabase.ts:904
+// gatekeeper-supabase/src/supabase.ts:950
 // This gatekeeper doesn't simulate writes, so the agent shouldn't continue (and read back
 // un-applied state) until the user decides on this statement.
 awaitDecision: true,
 ```
 
 ```ts
-// mcp-shared/src/session.ts:216
+// mcp-shared/src/session.ts:223
 // Nothing about a queued call is simulated, so later reads would show a world in which it
 // never happened. Wait for the decision instead.
 awaitDecision: true,
@@ -778,10 +897,18 @@ awaitDecision: true,
 
 Both are right: arbitrary SQL and arbitrary MCP tool calls have no predictable effect to model. MCP
 additionally returns a `status: "pending"` sentinel telling the agent to return from `executeCode` so
-the approval card can render.
+the approval card can render (`session.ts:237`).
 
 > **Design rule if we build one:** simulate ⟺ leave `awaitDecision` unset. Getting this backwards is
 > the real failure mode — a gatekeeper that neither simulates nor awaits will make agents thrash.
+
+**`gatekeeper-kit` now encodes the rule.** Every `ActionDefinition` must declare `delivery:
+"continue-with-simulation" | "await-decision"` (`gatekeeper-kit/src/actions.ts:144`), and the kit
+sets `awaitDecision` from it. The kit also ships `createSimulationView`, `replaySimulation` and
+`ProvisionalIds` (`gatekeeper-kit/src/simulation.ts`). Descriptions should come from its
+`ActionDescriptionBuilder` / `buildDescription()` (`gatekeeper-kit/src/action-description.ts`), which
+emits `fields` and sets `descriptionIsComplete` only when nothing was truncated. `USAGE.md:544`–`570`:
+never set `descriptionIsComplete` by hand, and never put agent- or provider-supplied text in the prose.
 
 ### 8.4 Singleton gatekeepers and ambient capsules
 
@@ -789,7 +916,7 @@ the approval card can render.
 always-present gatekeeper, installed into every one of the owner's gadgets automatically, with no
 binding step.* The resulting object is called an **ambient capsule**.
 
-Declared in two places (`gatekeeper-context/src/library-gatekeeper.ts:385` and `:132`):
+Declared in two places (`gatekeeper-context/src/library-gatekeeper.ts:382` and `:135`):
 
 ```ts
 autoProvisionsAccount: true,                    // VendorDescription — mint accounts with no OAuth
@@ -809,14 +936,14 @@ singleton: { tsType: "ContextLibrary" },        // AccountDescription — provid
 
 **Everything else is identical.** `ContextGatekeeper` is a plain `DurableObject implements
 Gatekeeper<LibraryReadSession>` installed as a facet like any other, with the same ApprovalQueue and
-the same per-read `authorizeObservation`. The contract says so outright (`gatekeeper.ts:651`):
+the same per-read `authorizeObservation`. The contract says so outright (`gatekeeper.ts:728`–`734`):
 
 > Because it is a normal Gatekeeper, the session and catalog run gadget-side in the gatekeeper's own
-> worker with no round-trip back through this account DO; every read is still authorized as an
-> observation via the ApprovalQueue, exactly like any gatekeeper.
+> worker with no round-trip back through this account DO; every session read is still authorized as
+> an observation via the ApprovalQueue, exactly like any gatekeeper.
 
-**Provisioning is a reconciliation, not a one-shot install** (`overseer.ts:4529`), run on every
-workspace open:
+**Provisioning is a reconciliation, not a one-shot install** (`ensureAmbientCapsules`,
+`overseer.ts:7556`), run on every workspace open:
 
 ```ts
 let accounts = (await ownerDo.listProvidedAccounts())
@@ -833,27 +960,31 @@ for (let gk of existingGatekeepers) {
 
 Two properties worth copying: provisioning is **per-account isolated** in a `try/catch` (one
 gatekeeper whose `getSingletonGatekeeperClass` throws must not block `open()` for the whole
-workspace), and it runs under `Promise.all` so Cap'n Web batches the class lookups.
+workspace), and it runs under `Promise.all` so Cap'n Web batches the class lookups
+(`:7590`–`7606`).
 
-The encapsulation note at `overseer.ts:4557` is the important one: **only the class reference crosses
+The encapsulation note at `overseer.ts:7583` is the important one: **only the class reference crosses
 out of the owner's user DO.** The account capability itself never leaves.
 
 **Broad scope forces more observer machinery.** `addObserver` cannot be the usual "can this user read
 the resource?" check, so Context tracks the collections actually revealed and verifies every observer
-against each one (`library-gatekeeper.ts:201`, `:343`). Note `GatekeeperUserVerifier` has **no
-methods** in the contract (`gatekeeper.ts:689`) — the convention is to add a non-standard method and
-trust the answer, because the overseer only ever hands a verifier back to the vendor that minted it.
+against each one (`ContextObserverTracker`, `gatekeeper-context/src/context-observers.ts:25`; used from
+`addObserver`, `library-gatekeeper.ts:339`). Note `GatekeeperUserVerifier` has **no methods** in the
+contract (`gatekeeper.ts:766`) — the convention is to add a non-standard method and trust the answer,
+because the overseer only ever hands a verifier back to the vendor that minted it.
 
-**Minimal reference implementation:**
-`cloudflare-os/packages/integration-tests/fixtures/gatekeeper-test/src/test-gatekeeper.ts` — ~200
-lines covering vendor, account, verifier and gatekeeper, with `singleton` and no `providesUi`.
+**Reference implementation:**
+`cloudflare-os/packages/integration-tests/fixtures/gatekeeper-test/src/test-gatekeeper.ts` — vendor,
+account, verifier and gatekeeper, with `singleton` and no `providesUi`. At 765 lines it is no longer
+minimal (it grew test controls, hooks and a response recorder); read `describe()` and the class
+wiring, skip the rest.
 
 ### 8.5 Management UIs (`providesUi`)
 
 **`providesUi` and `singleton` are independent.** Two separate optional fields on the same type
-(`gatekeeper.ts:170-181`); neither implies the other. The listing gate is an **OR**, over *all*
+(`gatekeeper.ts:173`–`184`); neither implies the other. The listing gate is an **OR**, over *all*
 connected accounts, with no `autoProvisioned` requirement in the inclusion test
-(`workshop-backend/src/user.ts:1336`):
+(`workshop-backend/src/user.ts:1498`):
 
 ```ts
 for (let rec of this.#connectedAccountRecords()) {
@@ -867,13 +998,13 @@ All four combinations are structurally legal:
 
 | `singleton` | `providesUi` | Example |
 |---|---|---|
-| ✓ | ✓ | Context Library (`library-gatekeeper.ts:132-136`) |
-| ✓ | ✗ | the integration-test fixture (`test-gatekeeper.ts:141`) |
+| ✓ | ✓ | Context Library (`library-gatekeeper.ts:135`–`136`) |
+| ✓ | ✗ | the integration-test fixture (`test-gatekeeper.ts:326`) |
 | ✗ | ✓ | nothing ships this, but it is supported |
 | ✗ | ✗ | every ordinary OAuth gatekeeper |
 
 **The real constraint is routing, not the flags.** The app id is the **vendorId**, not the account id
-(`workshop-backend/src/server.ts:558`):
+(`workshop-backend/src/server.ts:621`; rationale comment at `:598`):
 
 ```ts
 // UI-providing accounts are auto-provisioned singletons (one per vendor), so the vendor id
@@ -882,17 +1013,16 @@ let app = accounts.find(a => a.vendorId === id && a.description.providesUi);
 ```
 
 `find` — first match wins, so a vendor with several UI-declaring accounts would have all but one
-unreachable at `/gatekeepers/<vendorId>`. That is why the contract comment (`gatekeeper.ts:645`) says
-these methods are "Present only on accounts created by `GatekeeperVendor.createAccount()`": one
-account per vendor per user is what makes vendor-id routing sound. A latent assumption, not an
-enforced check.
+unreachable at `/gatekeepers/<vendorId>`. That is why the contract (`gatekeeper.ts:722`) says these
+methods are "Present only on accounts created by `GatekeeperVendor.createAccount()`": one account per
+vendor per user is what makes vendor-id routing sound. A latent assumption, not an enforced check.
 
 > **Upshot: `providesUi` needs `autoProvisionsAccount`, not `singleton`.** A UI-only gatekeeper — an
 > invoices page with no agent surface at all — is a legal and clean configuration.
 
 #### The UI calls the gatekeeper directly
 
-`startAppUi` returns an **arbitrary gatekeeper-defined capability** (`gatekeeper.ts:414`):
+`startAppUi` returns an **arbitrary gatekeeper-defined capability** (`gatekeeper.ts:419`):
 
 ```ts
 export type GatekeeperUiFrame = {
@@ -901,7 +1031,7 @@ export type GatekeeperUiFrame = {
 }
 ```
 
-Context mints it inside the account (`library-gatekeeper.ts:145`):
+Context mints it inside the account (`library-gatekeeper.ts:147`):
 
 ```ts
 async startAppUi(context: AppUiContext): Promise<GatekeeperUiFrame> {
@@ -922,16 +1052,16 @@ two very different surfaces:
 | Runs as | DO Facet under the Overseer | plain `RpcTarget` in the gatekeeper's worker |
 | Every read | `authorizeObservation()` → audit row | nothing |
 | Every write | `submitAction()` → approval queue | executed immediately |
-| Operations | `search` / `list` / `read` | `createContextCollection`, `putContextDocument`, `deleteContextDocument`, `moveContextDocument`, `deleteContextCollection`, git-token create/revoke, … |
+| Operations | `search` / `list` / `read` | `createContextCollection`, `updateContextCollection`, `putContextDocument`, `deleteContextDocument`, `moveContextDocument`, `deleteContextCollection`, `syncContextCollectionArtifactSource`, git-token create/list/revoke |
 
 The agent gets a read-only session that logs everything; the human gets full CRUD that logs nothing.
 That asymmetry is deliberate: **the approval queue governs the agent acting on your behalf, not you
 acting with your own hands.** Prompting for approval of your own clicks would be nonsense.
 
 **Transport.** `getGatekeeperApp` → `GatekeeperAppPage` → `SandboxedGatekeeperApp`:
-`sandbox="allow-scripts allow-modals"` (no `allow-same-origin` → null origin, network-isolated), and
-capnweb `newMessagePortRpcSession(port, host)`. Workshop relays `ui` through a rate limiter rather
-than handing it over raw (`SandboxedGatekeeperApp.tsx:105`): `maxConcurrency: 8`,
+`sandbox="allow-scripts allow-modals"` (`SandboxedGatekeeperApp.tsx:369`; no `allow-same-origin` →
+null origin, network-isolated), and capnweb `newMessagePortRpcSession(port, host)`. Workshop relays
+`ui` through a rate limiter rather than handing it over raw (`:106`–`111`): `maxConcurrency: 8`,
 `maxCallsPerMinute: 600`, `maxPendingCalls: 128`, throttle. The stub is a live server-side capability,
 released on unmount via `disposeFrame`.
 
@@ -939,9 +1069,9 @@ released on unmount via `disposeFrame`.
 
 1. **We own authorization completely.** Nothing upstream checks anything beyond "this user holds this
    account." Context does its own: `#assertCanRead` / `#assertCanWrite` / `#assertAdmin`
-   (`context-api.ts:89-116`).
+   (`context-api.ts:89`, `:100`, `:116`).
 2. **The only identity signal is `isAdmin`** — no user id, no email (`AppUiContext`,
-   `gatekeeper.ts:85`), passed fresh per open precisely because admin status changes. Per-user
+   `gatekeeper.ts:86`), passed fresh per open precisely because admin status changes. Per-user
    scoping must come from the account's own props, as Context does with `accountId`.
 3. **Nothing in this path is audited.** Deleting a collection through the UI leaves no trace in the
    workspace action log. An audit trail for the human path is ours to build.
@@ -949,15 +1079,19 @@ released on unmount via `disposeFrame`.
    is its only exit. Mint the narrowest object that works, never an internal API.
 
 Same mechanism, incidentally, as the small connect-modal form: `ResourceConfiguratorFrame` is a
-literal alias for `GatekeeperUiFrame` (`gatekeeper.ts:426`).
+literal alias for `GatekeeperUiFrame` (`gatekeeper.ts:431`).
 
 ### 8.6 Packaging note
 
-**`workshop-shared` is a member of *this* repo's pnpm workspace** (with `error-reporting`), which is
-what lets `packages/custom-gatekeeper` import the contract via a plain `workspace:*` dependency with
-no submodule changes. Catalog entries in `pnpm-workspace.yaml` must stay byte-identical to the
-submodule's — drift gives the tree two copies of `capnweb`, and a stub minted by one is
-unserialisable by the other.
+Three submodule packages are members of **this** repo's pnpm workspace: `workshop-shared`,
+`error-reporting`, and the build tooling `cloudflare-os/scripts` (`@gadgets/scripts`, needed because
+`error-reporting` depends on it). That is what lets `packages/custom-gatekeeper` import the contract
+via a plain `workspace:*` dependency with no submodule changes.
+
+The cost: every `catalog:` specifier those packages declare resolves against *our*
+`pnpm-workspace.yaml`, which must mirror the submodule's entries byte-for-byte. A missing entry fails
+`pnpm install` loudly (§13.1: `typescript6`, `zod`); a stale one is silent — two copies of `capnweb`,
+and a stub minted by one is unserialisable by the other.
 
 ---
 
@@ -968,7 +1102,7 @@ unserialisable by the other.
 `getTypeScriptTypes()` returns a bundled `types.txt` — heavily commented TypeScript declarations that
 become **the agent's documentation** for the API. That file is the product surface.
 
-The central pattern is **resources ↔ scopes**:
+The central pattern is **resources ↔ scopes** (`gatekeeper-slack/src/slack.ts:113`–`157`):
 
 ```
 WORKSPACE     https://*                                               → team:read, channels:*, groups:*, im:*, mpim:*, search:read
@@ -976,7 +1110,8 @@ CONVERSATION  https://app.slack.com/client/:teamId/:conversationId    → channe
 THREAD        https://*.slack.com/archives/:conversationId/:messageId → *:history only
 ```
 
-- `resourceUrlPatternsToScopes()` requests only the scopes for what is being granted
+- `resourceUrlPatternsToScopes()` requests only the scopes for what is being granted, plus an
+  always-present identity scope (`users:read`)
 - `grantedResourcesFromScopes()` exposes a resource only when **every** required scope was granted —
   a partial grant hides it rather than half-working
 
@@ -991,25 +1126,31 @@ forward-only `Cursor<T>`.
 | Server URL | **Each user types one** | **Admin sets one** (`MCP_PORTAL_URL`) |
 | Scope | Per-user | Per-deployment |
 | Unconfigured | n/a | Advertises no resources → Workshop hides it |
-| Trust | *"A user-supplied endpoint vouches only for itself"* | Behind Access + Gateway |
+| Trust | *"A user-supplied endpoint vouches only for itself"* (`mcp.ts:76`) | Behind Access + Gateway |
 
-Both gate writes: `readOnlyHint` on each MCP tool decides observation vs approval-gated action. In
-`gatekeeper-mcp`, tool annotations **never** earn auto-approval, precisely because the user supplied
-the endpoint.
+Both gate writes: `readOnlyHint` on each MCP tool decides observation vs approval-gated action
+(`mcp-shared/src/tools.ts:62`–`91`). Auto-approval additionally requires `trust === "vetted"`, so in
+`gatekeeper-mcp` tool annotations **never** earn it, precisely because the user supplied the endpoint.
 
-The portal's config validation is a good pattern: HTTPS-only, `hash` stripped, and **URL userinfo
-rejected outright** rather than silently stripped, since silently stripping would contact a
-different endpoint than the administrator configured.
+The portal's config validation is a good pattern (`gatekeeper-mcp-portal/src/config.ts:62`–`88`):
+HTTPS-only, `hash` stripped, and **URL userinfo rejected outright** rather than silently stripped,
+since silently stripping would contact a different endpoint than the administrator configured.
 
 ### 9.3 `gatekeeper-cloudflare`
 
-Three capabilities: **sign-in** (`providesAuth: true`); **AI Gateway BYOK billing** via
-`CloudflareGatekeeperUser.getUsableAccessToken()` — a contract extension marked *"Workshop-only —
-never exposed to gadgets or agents"*; and **Workers Observability** (account-level and per-Worker
-logs, invocations, traces, metrics).
+Three capabilities: **sign-in** (`providesAuth: true`; unusually, it keeps a full-scope grant — §7);
+**AI Gateway BYOK billing** via `CloudflareGatekeeperUser.getUsableAccessToken()` — a contract
+extension marked *"Workshop-only — never exposed to gadgets or agents"*; and **Workers
+Observability** (account-level and per-Worker logs, invocations, traces, metrics).
 
 That last one would let an agent inspect this deployment's own Worker logs — worth considering while
 the Error Reporter is disabled.
+
+Since #555 it refreshes tokens through `gatekeeper-kit`'s OAuth client, and a failed refresh marks the
+account expired **only on grant death** — `invalid_grant`, or another OAuth error code on a 4xx other
+than 429, excluding `invalid_client` (`cloudflare.ts:360`–`410`). 5xx, 429, WAF challenges, timeouts
+and malformed responses keep serving the cached token while it is valid, instead of hiding the
+account and demanding a reconnect that fixes nothing.
 
 ### 9.4 Building `gatekeeper-basecamp5` or `gatekeeper-telegram`
 
@@ -1021,6 +1162,12 @@ Basecamp's OAuth is **coarse** — effectively all-or-nothing per account — so
 Gatekeeper; and it is read+write, so mutations must be `ActionDescription`s behind the approval
 queue.
 
+Start from `gatekeeper-kit` rather than a copy of Slack: `OAuthClient` + `oauthRefresh` for the token
+endpoint (manual redirects, capped bodies, timeouts, RFC 7009 revoke, PKCE), `CredentialCoordinator`
+for serialized refresh, `ActionDescriptionBuilder` for approval text, and `delivery` per action
+(§8.3). Implement the connect handoff (`complete()` → `ConnectHandoff`, `reconnectComplete()`,
+`commitReconnect()`; §13.2) and set `BASE_URL` (§1.2).
+
 **Telegram is a design problem first.** The Bot API uses a bot token, not OAuth, so `connectAccount`
 resembles MCP's connect form. More seriously it is **update-driven**: there is no "fetch this
 channel's history" call, and group privacy mode limits a bot to messages addressed to it. A
@@ -1029,16 +1176,16 @@ durably accumulates messages from the moment it connects, or the design moves to
 user account. Inbound delivery is where `HookController`/`HookInitiator` and
 `external-message-gateway.ts` come in. Scope the history question before writing code.
 
-
 ### 9.5 `gatekeeper-email` — the Gatekeeper that *is* the service
 
 Structurally the odd one out, and the most instructive for anything we build on Cloudflare
 primitives. Every other Gatekeeper is a **client** of an external API. This one is a **server**: mail
-from the public internet enters the platform through it.
+from the public internet enters the platform through it. All `email.ts` references are
+`packages/gatekeeper-email/src/email.ts`.
 
 #### Two entry points
 
-`src/email.ts:161` — the default export carries a second handler:
+The default export carries a second handler (`email.ts:155`–`240`):
 
 ```ts
 export default {
@@ -1065,7 +1212,7 @@ router keeps one worker owning the origin.
 
 #### No OAuth, no credentials
 
-There is no third party to authorize against, so `connectAccount` (`email.ts:274`) mints a nonce URL
+There is no third party to authorize against, so `connectAccount` (`email.ts:265`) mints a nonce URL
 served by its *own* `fetch()`, and clicking it **is** the authorization. All the security is in the
 nonce: 32 bytes, `crypto.subtle.timingSafeEqual`, 10-minute expiry, and a 1-hour self-destruct alarm
 on the `UserAccount` DO if the flow is abandoned. Nothing expires afterwards; `reconnect()` throws.
@@ -1093,9 +1240,9 @@ async claim(userAccountId: string): Promise<boolean> {
 Three details make it correct rather than merely working:
 
 - **Claims are permanent.** `revoke()` disconnects every hook but explicitly does *not* release
-  claims — `// ... they are permanent.` Right call: releasing an address would let a later user
-  receive mail intended for an earlier one.
-- **Two-phase with conditional rollback** (`email.ts:427`) — `EmailAddress` is the source of truth,
+  claims — `// ... they are permanent.` (`:436`). Right call: releasing an address would let a later
+  user receive mail intended for an earlier one.
+- **Two-phase with conditional rollback** (`email.ts:423`) — `EmailAddress` is the source of truth,
   `UserAccount` the index, and the compensation is gated on `newlyClaimed` so a retry cannot release
   a pre-existing claim:
   ```ts
@@ -1104,7 +1251,7 @@ Three details make it correct rather than merely working:
   catch (error) { if (newlyClaimed) await emailAddress.releaseClaimAndHook(userAccountId); throw error; }
   ```
 - **Canonicalization enforced twice** — `validateEmailName` lowercases and regex-checks, then the URL
-  is re-encoded and compared: `if (emailNameSegment !== encodeURIComponent(validated.emailName)) throw`.
+  is re-encoded and compared (`:411`): `if (emailNameSegment !== encodeURIComponent(validated.emailName)) throw`.
   Without that second check, `Foo`, `foo` and `%66oo` would be three URLs claiming one mailbox.
 
 > **Generalizable:** any Gatekeeper that *is* the service inherits a namespace-allocation problem the
@@ -1113,14 +1260,16 @@ Three details make it correct rather than merely working:
 
 #### The canonical hook implementation
 
-`SKILL.md:301` names it outright: *"`gatekeeper-email` is the canonical reference implementation"*
-for hooks. Seen from the Gatekeeper side, the loop from [§8.2](#82-sessions-and-the-approvalqueue) is:
+`write-gatekeeper/SKILL.md:303` names it outright: *"`gatekeeper-email` is the canonical reference
+implementation"* for hooks. Seen from the Gatekeeper side, the loop from
+[§8.2](#82-sessions-and-the-approvalqueue) is:
 
-1. **Register** — `subscribe(callback)` (`email.ts:506`) builds the controller *at bind time* so its
+1. **Register** — `subscribe(callback)` (`email.ts:505`) builds the controller *at bind time* so its
    props capture this registration, then hands both to the overseer. It never stores the callback.
-2. **Enable** — `controller.enable(initiator, _target)` → initiator persisted in the `EmailAddress`
-   DO under `"hook"`. `_target` is unused but **must** be declared: RPC argument validation is
-   generated from the signature and rejects undeclared arguments.
+2. **Enable** — `controller.enable(initiator, _target)` (`:596`) → initiator persisted in the
+   `EmailAddress` DO under `"hook"`. `_target` is unused; since capnweb-validate 0.3.0 extra
+   arguments to a validated method are **dropped** rather than rejected, so declaring it is no longer
+   required (`:590`–`594`).
 3. **Deliver** — `receiveEmail` (`email.ts:661`) is worth reading closely:
    ```ts
    using startHookResult = hookInitiator.startHook();     // no await
@@ -1131,13 +1280,13 @@ for hooks. Seen from the Gatekeeper side, the loop from [§8.2](#82-sessions-and
    Web into one round trip. `using` disposes the result and every stub inside it.
 4. **Disable** — `#setHook(null)`.
 
-`startSession` calls `approvalQueue.dup()`, per the SKILL tip: Cap'n Web auto-disposes stubs passed
-as RPC parameters when the call returns, so anything outliving the call must be duplicated.
+`startSession` calls `approvalQueue.dup()`, per the SKILL tip (`:328`): Cap'n Web auto-disposes stubs
+passed as RPC parameters when the call returns, so anything outliving the call must be duplicated.
 
-#### Observers: "strategy D", and why it is legitimate *here*
+#### Observers: the "low-stakes" strategy, and why it is legitimate *here*
 
-`addObserver` / `removeObserver` are no-ops and `EmailVerifier.verify()` is empty. The justification
-(`email.ts:578`):
+`addObserver` / `removeObserver` are no-ops and `EmailVerifier.verify()` is empty — strategy D in
+`docs/observers.md`, "low-stakes" in the source. The justification (`email.ts:577`–`581`):
 
 > Each mailbox is a fresh address minted on the deployment's own domain for this Gadget; there is no
 > external ACL and no other party who "independently has access" to that inbox, so the Gadget's own
@@ -1156,16 +1305,17 @@ and from whom, never its content.
 `applyAction` throws, `rejectAction` no-ops, `revertAction` throws, `getAutoApprovableActions()`
 returns `[]`. Nothing is ever submitted to the queue.
 
-- **`SupportedResource.description` says "Send and receive emails."** There is no send path anywhere
-  in the package. An agent reading the resource catalog could reasonably believe outbound mail works.
+- **`SupportedResource.description` says "Send and receive emails."** (`:82`). There is no send path
+  anywhere in the package. An agent reading the resource catalog could reasonably believe outbound
+  mail works.
 - **Unbound mailboxes bounce, and leak the error.** `receiveEmail` throws when no hook is configured,
-  and the handler calls `message.setReject("Delivery failed: " + err)` — bouncing is right, but the
-  raw error text reaches the sender.
+  and the handler calls `message.setReject("Delivery failed: " + err)` (`:238`) — bouncing is right,
+  but the raw error text reaches the sender.
 
 #### Deployability for `os.veer.studio`
 
 It ships in every release but is excluded from the hosted deploy app
-(`scripts/release/manifest-lib.ts:260`):
+(`scripts/release/manifest-lib.ts:268`):
 
 ```ts
 // Not installable on customer instances: Email Routing needs a zone, which workers.dev-hosted
@@ -1179,11 +1329,11 @@ needs the same treatment MCP got: a `packageDirs` entry, `workers.email.name`, a
 flag, `GATEKEEPER_EMAIL` in the router's service list, a build command, and `BASE_URL`.
 
 `BASE_URL` matters more here than for MCP. It is simultaneously the resource-URL namespace *and* the
-fetch-handler path prefix, and `getGatekeeperClassFor` rejects any URL whose origin does not match.
-Left unset it falls back to `http://localhost:8787/gatekeeper/email` and **no mailbox can ever be
-bound** — a harder failure than MCP's broken callback.
+fetch-handler path prefix, and `getGatekeeperClassFor` rejects any URL whose origin does not match
+(`:387`). Left unset it falls back to `http://localhost:8787/gatekeeper/email` and **no mailbox can
+ever be bound** — a harder failure than MCP's broken callback.
 
-One further gotcha, admitted in the source (`email.ts:88`):
+One further gotcha, admitted in the source (`email.ts:92`–`97`):
 
 ```ts
 // TODO: This is actually a lie, as email routing can be configured on an entirely different
@@ -1208,20 +1358,29 @@ holds a *binding* to a Gatekeeper that holds the credential.
 | Deployment secrets | Wrangler secrets on the **consuming Worker** (e.g. `CLIENT_SECRET` on the gatekeeper Worker, never the backend) |
 | User OAuth tokens | The Gatekeeper's own DO (Slack's `UserAccount`) |
 | Delegated tokens | **Minted, not stored** — Context git tokens come from `repo.createToken("write", TTL)`; the Gatekeeper never holds them |
-| Privileged reads | Marked explicitly — `getUsableAccessToken()` is Workshop-only; `user.ts:694` carries `/** DO NOT MAKE PUBLIC -- returns API keys. */` |
+| Privileged reads | Marked explicitly — `getUsableAccessToken()` is Workshop-only; `user.ts:855` carries `/** DO NOT MAKE PUBLIC -- returns API keys. */` |
 
 Two implementation details worth copying:
 
 - Slack serializes credential mutations through a promise chain because *"rotating refresh tokens are
-  single-use"* — concurrent refresh/revoke against a rotating token is a real corruption bug.
-- `listGitTokens` filters to **write** tokens only; the DO mints its own read tokens for cloning and
-  deliberately does not expose them. `GIT_TOKEN_TTL_SECONDS = 31_536_000` (1 year).
+  single-use"* (`slack.ts:318`) — concurrent refresh/revoke against a rotating token is a real
+  corruption bug. `gatekeeper-kit`'s `CredentialCoordinator` is now the reusable form of this; Slack
+  itself still hand-rolls it.
+- `listGitTokens` filters to **active write** tokens only (`context-collection.ts:497`); the DO mints
+  its own read tokens for cloning and deliberately does not expose them.
+  `GIT_TOKEN_TTL_SECONDS = 31_536_000` (1 year).
 
 ### The sharp edge
 
-Blueprints exclude credentials — enforced. But from `docs/sharing.md`, *"the full `AiModelConfig`
-**including API key** is stored in the binding props"*. That key is in the **live gadget**, and
-`build` collaborators can read bindings.
+Blueprints exclude credentials — enforced. But `docs/sharing.md:144` says *"the full `AiModelConfig`
+**including API key** is stored in the binding props"*, and the code confirms it (`overseer.ts:11057`).
+Since #572 that config can also carry `extraHeaders` — e.g. a `cf-access-token` for a gateway behind
+Access, which may be the only credential when `apiToken` is empty. Those headers sit in the same props.
+
+We found no client or agent path that returns those props — `describe()` exposes only provider, model
+and display name, and the client gets a `RedactedAiModelConfig`. The concrete exposure is therefore
+*use*: a `build` collaborator can run the binding, and it bills its creator. The credential still
+lives in a shared gadget's storage.
 
 > **Never add a BYOK AI model binding to a gadget shared with clients.** Let each collaborator add
 > their own — that is already the platform's grain, and it bills them.
@@ -1231,9 +1390,9 @@ Blueprints exclude credentials — enforced. But from `docs/sharing.md`, *"the f
 1. Credentials belong to a **Gatekeeper**, never a gadget
 2. Deployment secrets → Wrangler secrets on the Worker that consumes them
 3. Prefer **minting short-lived scoped tokens** over storing long-lived ones
-4. **Serialize** credential mutations when refresh tokens rotate
+4. **Serialize** credential mutations when refresh tokens rotate — use `CredentialCoordinator`
 5. Sign-in should use **minimal scopes with a transient grant**
-6. Treat **binding props as visible to `build` collaborators**
+6. Treat **binding props — API keys and model headers — as held by the gadget**
 7. Never put a credential in `customGatekeeper.message`, a Context document, or a `SKILL.md` — all
    three are agent-readable, and Context documents are searchable
 
@@ -1259,8 +1418,8 @@ the commercial layer as an ambient Gatekeeper.
 
 #### Where the portal lives
 
-Two independent flags on `AccountDescription` (`gatekeeper.ts:170-181`) — see [§8.5](#85-management-uis-providesui)
-for the full mechanics:
+Two independent flags on `AccountDescription` (`gatekeeper.ts:173`–`184`) — see
+[§8.5](#85-management-uis-providesui) for the full mechanics:
 
 ```ts
 singleton?: { tsType: string };                       // an ambient agent capsule
@@ -1326,10 +1485,10 @@ Gatekeepers.**
   patching the submodule.
 - **Metering sits on the trust boundary** — decide deliberately whether a failed `recordUsage`
   blocks the call or is fire-and-forget. That choice is either a revenue leak or an outage.
-- **A charge cannot be honestly simulated.** Any agent-initiated billable action must set
-  `awaitDecision: true` and leave `autoApprovable` unset (see [§8.3](#83-simulating-actions)). The
-  human portal path is unaffected — it never touches the queue.
-
+- **A charge cannot be honestly simulated.** Any agent-initiated billable action must use
+  `delivery: "await-decision"` and leave `autoApprovable` unset (see
+  [§8.3](#83-simulating-actions)), with the amount and payee as `fields` so the approver sees them
+  literally. The human portal path is unaffected — it never touches the queue.
 
 ### 11.2 Media service on R2
 
@@ -1351,9 +1510,9 @@ transforms. Both require a zone — **the same constraint that makes `gatekeeper
 
 #### Verified: no in-tree precedent for serving bytes
 
-Every existing Gatekeeper `fetch()` handler is an OAuth callback, an MCP transport, or a status
-string. Context does **not** serve git itself — the platform `ARTIFACTS` binding does, and Context
-merely mints scoped credentials against it (`artifact-sync.ts:206`):
+Every existing Gatekeeper `fetch()` handler is an OAuth callback, a connect-nonce or handoff page, an
+MCP transport, or a status string. Context does **not** serve git itself — the platform `ARTIFACTS`
+binding does, and Context merely mints scoped credentials against it (`artifact-sync.ts:225`):
 
 ```ts
 let token = await repo.createToken("read", 3600);   // short-lived, per-operation
@@ -1361,8 +1520,8 @@ let token = await repo.createToken("read", 3600);   // short-lived, per-operatio
 
 So a media Gatekeeper serving public bytes would be the **first of its kind in this codebase**. The
 mechanism already exists: the router forwards `/gatekeeper/<suffix>/*` to whichever `GATEKEEPER_*`
-service is bound (`router/src/index.ts:27-34`), so `https://os.veer.studio/gatekeeper/media/...` needs
-no router change — only a binding.
+service is bound (`router/src/index.ts:28`–`35`), so `https://os.veer.studio/gatekeeper/media/...`
+needs no router change — only a binding.
 
 `ARTIFACTS`' short-lived scoped token is also the in-tree precedent for signed-URL minting, which
 matters below.
@@ -1386,16 +1545,17 @@ Uploads are a rare case where [§8.3](#83-simulating-actions) simulation is both
 because **the expensive half is idempotent and the approval only gates visibility**:
 
 1. `upload()` writes bytes to a **staging prefix immediately**, then `submitAction`
-2. Pending uploads appear in `list()` with a provisional id — GitHub's pattern
-   (`storage-schema.md:153`)
+2. Pending uploads appear in `list()` with a provisional id — GitHub's pattern, now `ProvisionalIds`
+   in `gatekeeper-kit`
 3. Approval is a **metadata flip**, not a byte copy
 4. `revertAction` moves the object back to staging — genuinely reversible, so
    `implementsRevert: true`
-5. No `awaitDecision` needed; the agent keeps working
+5. `delivery: "continue-with-simulation"`; the agent keeps working
 
 Deletes get the same treatment: soft-delete on approval, revert restores. Most Gatekeepers cannot
 offer real revert; this one can, which is worth exploiting rather than defaulting to
-`implementsRevert: false`.
+`implementsRevert: false`. Describe an upload with a `file` field (name, type, size, SHA-256) so the
+approver sees exactly which bytes they are publishing.
 
 Split the surface the usual way: `list()` / `read()` / `getUrl()` are observations; `upload()` /
 `delete()` / `replace()` are actions.
@@ -1407,7 +1567,8 @@ system**. Once an agent obtains one and writes it into a document, anyone with t
 bytes — and none of the platform's controls can reach it:
 
 - `excludeObservers` blocks a *read through the session*, not an HTTP GET to a CDN URL
-- `prohibitAllSharing` locks down the workspace, not a URL already emitted
+- `containsRestrictedData` stops the workspace's own web fetches and forces manual approval of its
+  actions; it cannot recall a URL already emitted
 - The audit log records that a URL was *minted*, never that it was *fetched*
 
 This is the same class of gap as email's — where the observation description carries the subject but
@@ -1427,11 +1588,11 @@ Option 2 with option 3 as the upgrade path is the pragmatic start.
 
 #### Observers
 
-If libraries are minted per-deployment for a gadget, email's **strategy D** (no-op `addObserver`,
-trivial verifier) is defensible on the same reasoning: no external ACL exists and the gadget's
-collaborators are the intended audience. The moment media becomes *private per user*, that argument
-dies and it needs Context's strategy — track which libraries were revealed, verify every observer
-against each.
+If libraries are minted per-deployment for a gadget, email's **low-stakes strategy** (no-op
+`addObserver`, trivial verifier) is defensible on the same reasoning: no external ACL exists and the
+gadget's collaborators are the intended audience. The moment media becomes *private per user*, that
+argument dies and it needs Context's strategy — track which libraries were revealed, verify every
+observer against each.
 
 #### Management UI
 
@@ -1463,60 +1624,69 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 ### Decided, not yet done
 
 - **Finish post-deploy verification of the 2026-09-13 deploy.** The CLI-checkable items passed
-  (§13.0); the authenticated ones did not run — `/admin` positive and negative, a denied identity,
+  (§13.2); the authenticated ones did not run — `/admin` positive and negative, a denied identity,
   the model picker, schedules still listed and a new one firing, and an end-to-end connect through
-  the new handoff flow. Do these in a browser before relying on any connector.
+  the handoff flow. Do these in a browser before deploying `ef65348f`, so a failure can be pinned to
+  one pin.
+- **Deploy `ef65348f`** — merge `bump/cloudflare-os-ef65348f`, then per §13.1: read live version IDs
+  first, present the mutation summary, deploy, run the full verification. **Decide
+  `userSearchEnabled` before deploying** and set it explicitly in `/admin` straight after (§6).
 - **Three blueprints** — message board, todo list, kanban; Basecamp-5 styled, built in-platform from
-  `format.document`, promoted via `/admin` → Formats (path A). Read the extracted `server.js` first
-  to decide whether to inherit its `document:v2` revision model.
+  `format.document`, promoted via `/admin` → Formats (path A). Read
+  `bundled-blueprints/blueprints/workspace-docs/files/server.ts` and `libraries/sync` first to
+  decide whether to inherit its `document:v2` revision model.
 - **Context collection** — a git-backed house knowledge base, `public` visibility so it is
   admin-write / everyone-read, with `skills/<name>/SKILL.md` folders.
 
 ### Deferred
 
-- `FORMAT_BLUEPRINTS_DIR` wiring into `buildCommands()` (path B), if bundling is wanted later
+- `BUNDLED_BLUEPRINTS_DIR` wiring into `buildCommands()` (path B), if bundling is wanted later
 - Custom Gatekeeper and Error Reporter — code retained, disabled
 - `veeros-gk-billing` scaffold — auto-provisioned Gatekeeper with `providesUi` and a stub portal
 - `veeros-gk-media` — R2 + Images/Stream, built on the `gatekeeper-email` "is the service" pattern
   (§11.2). Decide the public-URL question before writing code.
 - `gatekeeper-email` — shipped upstream but absent from `packageDirs`; installable for us because we
   hold a zone. Needs `BASE_URL`, a `GATEKEEPER_EMAIL` router binding, and Email Routing DNS.
-- `gatekeeper-basecamp5`
+- `gatekeeper-basecamp5` — on `gatekeeper-kit` (§9.4)
 - Connecting `gatekeeper-cloudflare` for Workers Observability
+- Removing the unused `CF_AI_GATEWAY_API_TOKEN` secret from `veeros-backend` (a `secret delete`
+  deploys a new version — needs its own approval)
 
 ### Watch
 
 - **This repo is not the only thing that deploys to this account.** A full `pnpm deploy` landed on
-  2026-09-10 that no commit or note here records (§13.0). Before any deploy, read the live version
-  IDs from the account rather than trusting this doc — and note `wrangler deployments list` prints
-  **oldest-first**, so the current version is the *last* entry.
-- **Node 24.15.0 < declared `>=24.19.0`** — warning only today
-- **`README.md` says "The deployment is six Workers"** — stale; the count is now configurable
-- **Any future OAuth Gatekeeper needs `BASE_URL`** — nothing enforces it. Since `08afe059`,
-  `PUBLIC_BASE_URL` on the *backend* is load-bearing for every connector too (§13.0), and a
-  Gatekeeper with a connect flow must implement the new `complete()` / `reconnectComplete()`
-  handoff contract.
+  2026-09-10 that no commit or note here records (§13.2). Before any deploy, read the live version
+  IDs from the account rather than trusting this doc.
+- **`pnpm check` does not compile disabled packages** — run `pnpm lint` on every bump (§1.3, §13.1).
+- **Upgrades reshape our workspace, not just versions** — keep catalog entries byte-identical, and
+  expect new members and new `catalog:` specifiers from the three submodule packages we host
+  (§8.6, §13.1, §13.3).
+- **`README.md` says "The deployment is six Workers"** — stale; the count is configurable (five
+  active here)
+- **Toolchain drift** — our top-level Wrangler resolved to 4.143.0 while the submodule pins 4.138.0.
+  Dry-runs and deploys run the submodule's; ours is used only for `whoami`/`secret`/`deployments`.
+- **Any future OAuth Gatekeeper** needs `BASE_URL` (nothing enforces it), relies on the backend's
+  `PUBLIC_BASE_URL`, and must implement the connect handoff (`complete()` → `ConnectHandoff`,
+  `reconnectComplete()`, `commitReconnect()`).
 - **Typed-storage property names are storage keys** — renaming a persisted field is a migration
-  unless it declares `storageKey` / `storageName` (§13.0)
-- **Restricted data has a stated `use`-collaborator hole** (§13.0) — relevant before connecting any
+  unless it declares `storageKey` / `storageName` (§13.2)
+- **Restricted data has a stated `use`-collaborator hole** (§13.2) — relevant before connecting any
   gatekeeper holding client-confidential data to a workspace with `use` collaborators
+- **User search exposes emails** to every authenticated user when on, and the directory fills only
+  as people sign in (§6)
+- **Model configs are credentials** — `extraHeaders` and API keys both live in binding props (§10)
 - **`blueprintId` is an install key** — never rename after deploy
-- **Upstream `enableHook` / `disableHook` race** (`overseer.ts:2697`, `enableHookRecord`, at pin
-  `54d5d8b0`) — a losing `enable()` can
+- **Upstream `enableHook` / `disableHook` race** (`overseer.ts:11221`) — a losing `enable()` can
   resurrect gatekeeper-side state that keeps consuming alarms and quota. Relevant only once we run a
   hook-driven Gatekeeper of our own.
-- **`providesUi` routing keys on vendor id, not account id** (`server.ts:580`) — one UI-declaring
+- **`providesUi` routing keys on vendor id, not account id** (`server.ts:621`) — one UI-declaring
   account per vendor per user, or the extras become unreachable
-- **Upgrades**: keep `pnpm-workspace.yaml` catalog entries byte-identical to the submodule's — and
-  expect submodule workspace *reshapes* too, not just version drift (§13.1: a new member to add and
-  a test filter to widen)
 - **The next storage migration will not be free.** §13.3's rollback-is-gone tradeoff was acceptable
   only because no gadget history existed. Once real gadgets do, a migrating bump needs a parallel
   Workshop identity with its own storage, exercised against a copy, before it touches production.
-- **`gitObjects` has no GC and a soft ~2MB per-object ceiling** (§14.1) — neither enforced. Worth a
-  look at actual object counts once gadgets accumulate history.
-- **`scratchpad/extract-gadget.mjs` is obsolete** for built-ins (§4.2); it still applies to
-  `.gadget` files exported from `/admin`.
+  (`ef65348f`'s `v3` is additive only.)
+- **`gitObjects` has no GC** (§14.1). Gatekeeper-supplied objects are capped at 1 MiB; locally
+  written ones only softly. Worth a look at actual object counts once gadgets accumulate history.
 
 ---
 
@@ -1524,13 +1694,83 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 Newest first.
 
-### 13.0 `54d5d8b0` → `08afe059` (2026-09-13) — deployed
+### 13.1 `08afe059` → `ef65348f` (2026-09-29) — not deployed
 
-**Deploy record.** Deployed 2026-09-13 19:31–19:32 UTC, account `cae2b6350c3a5a8bc9451652ffb0c9d7`
-(VEER Studio), route `os.veer.studio`, from root commit `303dc0a` / submodule `08afe059`. All five
-active Workers deployed in the script's order, exit 0.
+55 commits, 2026-09-14 → 2026-09-28. A clean fast-forward; the starter wrapper remains 0 behind
+`cloudflare/cloudflare-os-starter`. Bumped on branch `bump/cloudflare-os-ef65348f` (commit
+`e57084c`). `pnpm lint`, `pnpm check` (30/30 wrapper tests, all five active Workers dry-run clean,
+generated configs removed) and `pnpm test` pass. Upstream's own suites were not run.
 
-| Worker | Previous version (rollback target) | New version |
+#### What the wrapper had to change
+
+1. **Catalog re-sync.** `@gadgets/scripts` — a member of our workspace since §13.3 — now declares
+   `typescript6: catalog:` and `zod: catalog:`, so both must resolve here or `pnpm install` fails.
+   Added `typescript6` (`npm:typescript@6.0.3`), `zod` (`^4.5.4`) and `miniflare`
+   (`5.20260921.1-alpha`); bumped `vitest` to `^4.1.11` and `wrangler` to `^4.138.0`; pointed the
+   `@cloudflare/vitest-pool-workers>miniflare` override at the catalog. `capnweb` stays a single
+   copy (0.12.0).
+2. **`custom-gatekeeper` gained `commitReconnect()`.** A throwing stub, like upstream's Scheduler.
+   **This was already broken at `08afe059`**: #464/#473 made `GatekeeperUser.commitReconnect`
+   required, so `pnpm lint` failed on `main` from the moment of that bump. §13.2's claim that our
+   package was "unaffected" was wrong — it checked for a connect callback, not for the new required
+   method. `pnpm check` never noticed because it skips the disabled package (§1.3).
+
+#### What did not change
+
+`scripts/deploy.ts`, the two submodule scripts it imports (`pnpm-command.ts`, `bin-entry.ts`), build
+task names, compatibility dates and flags, engines, and every binding — the backend's dry-run
+bindings are identical to what is live. The only Wrangler config change is Workshop migration `v3`,
+`new_sqlite_classes: ["UserDirectoryDurableObject"]`, reached through `ctx.exports` with no binding;
+`deploy.ts` carries `migrations` through from the base config untouched.
+
+**No data migration.** The Overseer's schema and git storage are unchanged in shape. Rollback to
+`08afe059` is not proven: whether Cloudflare permits a Worker version rollback across an applied
+Durable Object migration must be checked against the rollback docs before relying on it.
+
+#### Behaviour changes that matter to us
+
+- **User directory and search** (#474) — §6. The `!signupsEnabled` default turns search on for
+  closed-signup deployments; decide before deploying.
+- **Restricted mode replaces lockdown** (#487), plus **`ownerInvitesOnly`** (#523) and
+  **`descriptionIsComplete` / `fields`** (#541, #565) — §8.2, §8.3. A restricted workspace now
+  works, with every action manually approved and git pushes refused.
+- **Catalog is not an observation and is reloaded every turn** (#267) — §3.5, §8.2. Good for the
+  planned skills collection: new skills appear mid-chat.
+- **Breaking for gadget code: `spawnCallable(title, options)`** (#492), and **`GIT` is a reserved
+  binding name** (#570) — §14.5, §14.7. We have no gadgets yet.
+- **Worktrees** gained a code-editor UI, pin-on-first-modification, and a full-40-hex id
+  requirement; gadgets gained `env.GIT` (#513, #570) — §14.4, §14.5.
+- **Agent tools**: a `grep` tool, `readFile` line windows, a 32K cap on every tool result the model
+  sees (#494); `describeBinding` on a gadget's bindings (#573).
+- **Models**: pi 0.87.1 adds Claude Opus 5.5, Fable 5.1 and GPT-6 (#556). Manually configured models
+  can carry extra headers and context/output limits, and configs can be edited or cloned (#572) —
+  see §10 on where those headers live.
+- **`gatekeeper-kit`** gained an OAuth 2.0 client; Cloudflare stops expiring accounts on transient
+  refresh failures (#555) — §9.3, §9.4.
+- **Bundled blueprints moved to TypeScript** in `packages/bundled-blueprints`;
+  `FORMAT_BLUEPRINTS_DIR` → `BUNDLED_BLUEPRINTS_DIR` (#466) — §4.2, §4.4.
+- **Fixes**: getting stuck on a failed MCP approval (#566) or while verifying access to a shared
+  workspace (#559); local workerd moved past a facet use-after-free (local only, #567).
+- **Also**: Google Drive folder resource and Docs tables (#440, #518), multi-invite (#526), the
+  agent-facing `types.d.ts` self-containment lint (#581, #582), and three rounds of public-API kernel
+  integration tests.
+
+#### Verification to add for this deploy
+
+On top of the standing list: `/admin` shows the user-search toggle and it is set as decided; the
+model picker lists providers and the new models; an existing schedule still fires; the Context
+catalog loads in a new chat.
+
+### 13.2 `54d5d8b0` → `08afe059` (2026-09-13) — deployed
+
+Six commits, 2026-09-09 → 2026-09-11. `pnpm check` needed no wrapper changes — but `pnpm lint`
+would have failed (§13.1).
+
+**Deploy record.** Deployed 2026-09-13 19:31–19:32 UTC, account `cae2b6350c3a5a8bc9451652ffb0c9d7`,
+route `os.veer.studio`, from root commit `303dc0a` / submodule `08afe059`. All five active Workers
+deployed in the script's order, exit 0. These versions are still live (§2).
+
+| Worker | Previous version | Deployed version |
 |---|---|---|
 | `veeros-gk-context` | `f8c5cba6-347b-47ae-974b-fd3bb52324b3` | `31f55ebd-5526-47ed-977d-05b18e6fa4fa` |
 | `veeros-gk-scheduler` | `8b4315a0-3457-4221-b4d0-a234b6bbb980` | `c348f02c-43d8-4a11-bd96-6dd6f4dda510` |
@@ -1538,229 +1778,119 @@ active Workers deployed in the script's order, exit 0.
 | `veeros-backend` | `5b113d30-fdc9-40fb-8c2d-4e16c679a6c7` | `07d644e5-e59c-4621-a8f9-14005b0282c7` |
 | `veeros` (router) | `59355b84-6873-457d-b2fa-683ce8ab92cf` | `593eba4d-a7bd-4239-9ff8-d0e663fb9a4f` |
 
-Verified after deploy: valid TLS on `os.veer.studio`; an unauthenticated request 302s to
-`veerstudio.cloudflareaccess.com` with the audience matching the configured `CF_ACCESS_AUD`;
-`/api`, `/gatekeeper/mcp` and the new `/connect/handoff` all sit behind the same Access
-application; the backend's new version carries compatibility date `2026-09-04` with
-`PUBLIC_BASE_URL` present, and `wrangler` reported *"No targets deployed for veeros-backend"* —
-the Router holds the only route. The frontend bundle includes `connect.handoff-*.js`, the route
-#473 added.
+**Verified:** valid TLS on `os.veer.studio`; an unauthenticated request 302s to
+`veerstudio.cloudflareaccess.com` with the configured audience; `/api`, `/gatekeeper/mcp` and
+`/connect/handoff` sit behind the same Access application; the backend carries compatibility date
+`2026-09-04` with `PUBLIC_BASE_URL`; the Router holds the only route. **Not verified:** everything
+needing an authenticated browser session (§12).
 
-**Not verified** (needs an authenticated browser session, not a CLI probe): `/admin` allowing an
-administrator and denying an authenticated non-administrator; a denied negative-test identity;
-the model picker listing providers; existing schedules still listed and a new one firing;
-end-to-end connect through the new handoff. Worth doing before relying on any connector.
+**`54d5d8b0` had already been deployed** on 2026-09-10 ~10:25 UTC, outside this repo's recorded
+history — so the one-way git-storage migration (§13.3) ran then. Hence the §12 rule: read the
+account, not this doc.
 
-**Correction to the previous status.** This doc claimed `54d5d8b0` was "not yet deployed". It was
-wrong. `wrangler deployments list` shows all five Workers deployed **2026-09-10 ~10:25–10:27 UTC**
-in the script's order, and the then-live backend version `5b113d30` carried compatibility date
-`2026-09-04` without `enhanced_error_serialization` — i.e. the `54d5d8b0` build. That deploy
-happened outside this repo's recorded session history. **Consequence: the one-way git-storage
-migration (§13.3) ran on 2026-09-10, not on 2026-09-13.** The 2026-09-13 deploy carried only the
-six commits below. Lesson recorded in §12: `deployments list` prints oldest-first, and the doc's
-notion of what is live is not evidence — check the account.
+**Connect flows are bound to the initiating browser** (#464, #473). A connect URL used to be a bearer
+capability — an attacker could start a connect and phish a victim into finishing it, delivering the
+victim's tokens into the attacker's account. Now the final page posts a single-use ticket (SHA-256 of
+a fresh 256-bit value, two-minute lifetime) plus a per-flow nonce, redeemed from the popup over the
+initiating user's own session. Consequences:
 
-Six commits, 2026-09-09 → 2026-09-11. Another clean fast-forward. **The wrapper needed no changes
-at all this time** — no catalog drift, no workspace reshape, no `package.json` edit; `pnpm install`
-reported "Already up to date" for both workspaces. `pnpm check` passes, all six Workers dry-run
-clean. The starter remains 0 behind `upstream/main` (we are 3 ahead, all ours).
-
-No storage migration, no Durable Object or wrangler changes, no compatibility-date movement. The
-range is two security fixes and a policy change:
-
-**Connect flows are now bound to the initiating browser** (#464, #473). A gatekeeper connect URL
-was a bearer capability: whoever finished OAuth at it had their provider tokens delivered into the
-account that *started* the flow, so an attacker could start a connect and phish a victim into
-opening the URL. Now the gatekeeper's final page posts a single-use ticket (SHA-256 of a fresh
-256-bit value, two-minute lifetime) plus a per-flow nonce, redeemed from the popup itself over the
-initiating user's own session; an alarm revokes staged connects whose ticket never comes back.
-The follow-up (#473) moved redemption into the popup and dropped the BroadcastChannel transport
-entirely.
-
-Two consequences for us:
-
-- **`GatekeeperConnectCallback.complete()` is a breaking contract change** — it now returns a
-  `ConnectHandoff` instead of `void`, and a new `reconnectComplete(stageId, expiresAt?)` covers
-  reconnect / `ensureResources`, staging credentials until the Workshop calls
-  `GatekeeperUser.commitReconnect()`. `credentialsRestored()` survives for out-of-band refresh only.
-  **Any Gatekeeper we write with an OAuth connect flow must implement this.** Our
-  `packages/custom-gatekeeper` is unaffected: its `connectAccount` throws
-  ("auto-provisioned and has no connect flow"), so there is no callback to update.
-  `gatekeeper-kit` ships `connectHandoffPageHtml()` for the final page.
-- **`PUBLIC_BASE_URL` is now required for connects**, read on the *backend*
-  (`workshop-backend/src/connect-handoff.ts:30`), which throws
-  *"PUBLIC_BASE_URL is not configured, so account connections cannot complete."* Ours is set to
-  `https://os.veer.studio` and appears in the dry-run bindings, so this is satisfied — but it
-  sharpens the §12 watch item: the variable is now load-bearing for every connector, not just for
-  absolute links and OAuth redirects.
+- **`GatekeeperConnectCallback.complete()` returns a `ConnectHandoff`**, a new
+  `reconnectComplete(stageId, expiresAt?)` stages reconnect credentials, and
+  **`GatekeeperUser.commitReconnect(stageId)` is required** — the Workshop calls it to make staged
+  credentials live. `gatekeeper-kit` ships `connectHandoffPageHtml()` for the final page.
+- **`PUBLIC_BASE_URL` is required on the backend for any connect** to complete
+  (`workshop-backend/src/connect-handoff.ts`). Ours is set.
 
 **Restricted-data sharing moved from lockdown to per-collaborator verification** (#381, #382, #308).
-`ObservationDescription.prohibitAllSharing` is renamed `containsRestrictedData` (and
-`GadgetMetadata.sharingProhibited` likewise) — a hard rename with no alias, because the flag states
-a fact about the data while the *policy* was being replaced. The old behaviour was blunt: one
-restricted observation blocked sharing with anyone, "which made every sensitive data source
-unusable the moment a workspace had a single collaborator." Now the workspace stays shareable and
-each collaborator is admitted only while verified as an observer of the producing gatekeeper,
-checked at **every `open()`** rather than at grant time, with any widening of scope restarting live
-sessions. The two guards that are about data leaving rather than who may see it — no actions, no
-public web fetches once latched — are kept.
+`prohibitAllSharing` became `containsRestrictedData`, a hard rename. Instead of one restricted
+observation blocking sharing with anyone, each collaborator is admitted only while verified as an
+observer of the producing gatekeeper, checked at every `open()`. `ef65348f` then replaced the
+remaining "no actions" guard with restricted mode (§8.2). Two limits upstream states plainly:
 
-Upstream states two limits of the new model plainly, worth knowing before we connect anything
-sensitive:
+- **Coverage is held to each collaborator's role scope.** An agent can read an *unbound* gatekeeper
+  through a chat binding, persist the restricted result into gadget storage or UI state, and expose it
+  to an unverified `use` collaborator — a *"Known security limitation"*, accepted.
+- **Enforcement is at admission, not at each read**; an unverified redeemer persists in
+  `listCollaborators` until removed.
 
-- **Coverage is held to each collaborator's role scope.** A `use` collaborator is verified only
-  against gatekeepers in their scope. The agent can read an *unbound* gatekeeper through a chat
-  binding, persist the restricted result into gadget storage or UI state, and thereby expose it to
-  an unverified `use` collaborator. Upstream labels this a *"Known security limitation"* and
-  accepts it for this implementation.
-- **Enforcement is at admission, not at each read**, and share-key redemption stays one-step — so
-  an unverified redeemer and a refused recipient both persist in `listCollaborators` until removed.
-  Two-phase redemption is the stated follow-up.
+**Typed-storage property names are keys.** The rename was storage-safe only because `typed-storage`
+gained `singleton(default, {storageKey})` and `collection(..., {storageName})`, and the overseer keeps
+`storageKey: "prohibitAllSharing"` — without it, *"every workspace that has already observed
+restricted data would silently unlatch."*
 
-The rename is storage-safe by construction, and the mechanism is reusable: `typed-storage` gained
-`singleton(default, {storageKey})` and `collection(..., {storageName})` so a schema can declare the
-key it lives under. The overseer's singleton keeps `storageKey: "prohibitAllSharing"` on disk —
-without it, *"every workspace that has already observed restricted data would silently unlatch."*
-Worth remembering the next time we rename a persisted field: in typed-storage, property names
-**are** keys.
+### 13.3 `6478a144` → `54d5d8b0` (2026-09-09) — deployed 2026-09-10
 
-Also in range: an integration test covering a deleted workspace's listing over a fresh session
-(#478).
+82 commits, 2026-08-18 → 2026-09-08. A clean fast-forward.
 
-### `6478a144` → `54d5d8b0` (2026-09-09)
+#### What the wrapper had to change
 
-Bumped 2026-09-09. 82 commits, 2026-08-18 → 2026-09-08. The old pin is a strict ancestor of
-`origin/main`, so this was a clean fast-forward with no divergence to reconcile. The starter wrapper
-itself needed nothing from `cloudflare/cloudflare-os-starter` — our `main` was already level with
-upstream's.
+Three edits, all forced by upstream repackaging:
 
-### 13.1 What the wrapper had to change
+1. **`pnpm-workspace.yaml` catalog mirror**, plus a new `@cloudflare/workers-types` entry
+   (`workshop-shared` declared it `catalog:`) and the two `@cloudflare/vitest-pool-workers`
+   overrides.
+2. **`cloudflare-os/scripts` added as a workspace member.** Upstream #431 turned the build tooling
+   into `@gadgets/scripts`, and `error-reporting` declares it `workspace:*` — which only resolves
+   against the workspace owning the member, ours. Without it: `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`.
+3. **`package.json` test filter** — `--filter '!@gadgets/scripts'`, because that package's `test`
+   task is upstream's workspace-wide CI guard and shells out to a bin not linked into its own `.bin`.
 
-Three edits, all forced by upstream repackaging rather than by anything we chose:
+All three follow from the submodule reshaping its own workspace; expect the same classes on future
+bumps (§13.1 was class 1 again).
 
-1. **`pnpm-workspace.yaml` catalog mirror.** Bumped to match the submodule byte-for-byte:
-   `@cloudflare/vitest-pool-workers` `^0.20.2` → `^0.22.0`, `capnweb` `^0.11.1` → `^0.12.0`,
-   `capnweb-validate` `0.2.4` → `0.3.0`, `wrangler` `^4.119.0` → `^4.128.0`, plus a new
-   `@cloudflare/workers-types` `^5.20260903.1` entry (`workshop-shared` now declares it as
-   `catalog:`, and that specifier resolves in *our* workspace because `workshop-shared` is a member
-   of it). Also mirrored the two new `@cloudflare/vitest-pool-workers>miniflare` /
-   `>wrangler` overrides, which keep the test pool's workerd aligned with the toolchain.
+#### The one-way migration
 
-2. **`cloudflare-os/scripts` added as a workspace member.** Upstream #431 turned the shared build
-   tooling into a real package, `@gadgets/scripts`, and `cloudflare-os/packages/error-reporting` —
-   one of the two submodule packages we pull into *our* workspace — now declares it as a
-   `workspace:*` devDependency. A `workspace:*` specifier only resolves against the workspace that
-   owns the member, so without the entry `pnpm install` fails outright with
-   `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`. Adding it is the fix; we never build or import it.
+**The only irreversible change so far.** Upstream #275 moved mainline gadget code out of the
+workspace-wide Yjs update log into real git commits (§14). `workshop-backend/src/git-migration.ts`
+converts a workspace once: it replays the legacy `code`/`snapshots` log, synthesizes a chain of real
+commits per gadget, and rewrites every record that referenced a code-log version to a commit —
+gadget heads, historical `merge` messages, blueprint records.
 
-3. **`package.json` test filter.** Adding that member pulled it into
-   `vp run --filter '!cloudflare-os-starter' --cache test`, and its `test` task shells out to
-   `gadgets-with-timeout` — its own bin, not linked into its own `.bin` — so the run died with
-   `Failed to find executable gadgets-with-timeout`. That suite is upstream's workspace-wide CI
-   guard (it walks `packages/…` from the *submodule* root); it belongs to
-   `pnpm --dir cloudflare-os test`, not to ours. Excluded with a second
-   `--filter '!@gadgets/scripts'`.
+- **It runs itself** — in the Overseer DO constructor under `blockConcurrencyWhile`, gated by the
+  `version` singleton (`overseer.ts:2002`; `#migrateToGitStorage` at `:2069`, followed by the action-
+  index and workpiece-type migrations), on the first request after the Workshop deploy. No dry-run,
+  no opt-out.
+- **It is safe to crash** — content-addressed writes, deterministic record rewrites, the version stamp
+  written last; a chat that already has a `codeBase` is skipped.
+- **It is not reversible.** Pre-conversion chat messages keep their retired Yjs bytes "as rollback
+  insurance, but nothing can apply them". The old `code`/`snapshots` collections are still present,
+  read-only, at `ef65348f` (`overseer.ts:1171`–`1188`); upstream intends to delete them later.
 
-None of these are optional and none are reversible by config — expect the same three classes of
-breakage on future bumps, since all three follow from the submodule reshaping its own workspace.
+We accepted this deliberately: nothing of consequence had been built in the Workshop. **That
+judgement expires the moment real gadgets exist** (§12).
 
-### 13.2 What the wrapper did *not* have to change
+Context storage moved to bytes (#274), backward-compatible on read — pre-existing string rows still
+decode.
 
-`scripts/deploy.ts` survived untouched. Every anchor it reaches into still exists at the new pin,
-and the two files it imports by relative path — `cloudflare-os/scripts/pnpm-command.ts` and
-`bin-entry.ts` — are byte-identical across the range. The build task names it drives
-(`build:app` on `gatekeeper-context` and `gatekeeper-scheduler`, `build` on `gatekeeper-mcp`) are
-unchanged, as is `resolveAiGateway()` in `scripts/preview/staging-config.ts`, which
-`deploy.ts` mirrors. `pnpm check` passes: wrapper tests green, all six Workers dry-run clean,
-generated `wrangler.prod.jsonc` files removed afterward.
+#### Also in range
 
-Package inventory gained two and lost none: `gatekeeper-kit` (a **library**, explicitly "not a
-deployable Worker" — the connect-flow, credential, action, observation and simulation primitives
-the gatekeepers now share) and `workshop-evals`. Nothing `deployment.jsonc` names changed identity,
-so the Worker names, storage bindings and Access configuration all carry over as-is.
-
-### 13.3 The one-way migration
-
-**This is the only part of the bump that is not reversible.** Upstream #275 moved mainline gadget
-code out of the workspace-wide Yjs update log and into real git commits (§14).
-`workshop-backend/src/git-migration.ts` converts an existing workspace on the way: it replays the
-legacy `code`/`snapshots` log once, synthesizes a chain of real commits per gadget, and rewrites
-every record that referenced a code-log version to reference a commit instead — gadget heads
-(`GadgetRecord.commitId`), historical `merge` messages, and blueprint records
-(`codeVersion` → `commitId`).
-
-Operationally, three things matter:
-
-- **It runs itself.** The migration fires in the Overseer DO constructor under
-  `blockConcurrencyWhile`, gated by the `version` singleton (`overseer.ts:1925`,
-  `#migrateToGitStorage` at `overseer.ts:1973`) — i.e. on the first request after the Workshop
-  deploy, not from a command anyone runs. There is no dry-run and no opt-out.
-- **It is safe to crash.** Object writes are content-addressed (recommitting identical history
-  yields identical oids), record rewrites are deterministic from storage state, and all of them
-  land in one synchronous tail. A crashed run is simply redone; a chat that already has a
-  `codeBase` is skipped as already-converted.
-- **It is not reversible.** Pre-conversion chat messages keep their retired Yjs `update` bytes on
-  disk "as rollback insurance, but nothing can apply them" — delivery strips them. Rolling the
-  Workshop Worker back to `6478a144` afterward would leave the old code reading a converted store.
-  The old `code`/`snapshots` collections are kept read-only for a transition period; upstream
-  intends to delete them in a later change.
-
-We accepted this deliberately: nothing of consequence has been built in the Workshop yet, so
-there is no gadget history worth protecting. **That judgement expires the moment real gadgets
-exist.** The next bump that carries a storage migration needs the full treatment — a parallel
-Workshop identity with its own storage, exercised against a copy — because a rollback will no
-longer be available as a safety net.
-
-Context storage changed format too (`Uint8Array` instead of JS strings, #274) but is
-backward-compatible on read: `decodeStoredContextBody` accepts `string | Uint8Array`, so
-pre-existing rows still decode. No migration, nothing to approve.
-
-### 13.4 Compatibility-date bump
-
-Every Worker moved from `2026-02-02` (`2025-11-01` for the router) to `2026-09-04`, and
-`workshop-backend` dropped the `enhanced_error_serialization` flag. This is a runtime behaviour
-change independent of any code in this repo, and it lands with the same deploy. Nothing in our
-configuration pins a compatibility date, so there is no local override to reconcile — but it is
-the reason a post-deploy verification pass matters more than usual on this bump.
-
-### 13.5 Everything else, by theme
-
-- **Gatekeeper platform** — `gatekeeper-kit` bootstrap and leaf modules; replayable runs, declared
-  action fences and a conformance consumer (#460); pending-action file storage; a preview-OAuth
-  helper. Relevant to §8: the contract we documented is now partly *library*, not just convention.
-- **Git and remotes** — worktrees, the `GitCache` layer, and the GitHub gatekeeper's real
-  smart-HTTP transport (§14).
-- **Google** — Drive gatekeeper foundation, native document sessions, metadata search, multi-tab
-  Docs, Calendar primary-alias resolution and batching guidance, configurator token refresh.
-  Enhanced Gmail support (#367).
-- **Observer verification** — coverage bookkeeping fixes and session restart when scope widens
-  (#380). Touches §8.2's account of observer registration.
-- **Models** — GLM 5.3 Flash, DeepSeek V4 Pro 0813, pi 0.84.3.
-- **Frontend** — chat composer extracted and hardened, a skill picker with composer pills, mobile
-  and responsive work, IME composition guards, several layout fixes.
-- **Blueprints** — built-ins unpacked from `.gadget` archives into reviewable source trees (§4.2).
+Every Worker's compatibility date moved to `2026-09-04` (`workshop-backend` dropped
+`enhanced_error_serialization`) — nothing here pins one. New packages `gatekeeper-kit` (a library, not
+a Worker) and `workshop-evals`; no deployable identity changed. Themes: gatekeeper-kit foundations,
+git storage and worktrees (§14), Google Drive/Docs/Gmail work, observer-verification fixes, new
+models, frontend composer and mobile work, and built-in blueprints unpacked into source.
 
 ---
 
 ## 14. Git-backed code storage and worktrees
 
-New at pin `54d5d8b0` (upstream #275 for the store, #384 for the remote flows). This replaces the
-Yjs-log account of mainline code that §3 and §4 were written against. The plans upstream wrote for
-both are checked in and worth reading directly: `cloudflare-os/plans/git-storage.md` and
-`cloudflare-os/plans/worktrees.md`.
+New at pin `54d5d8b0` (upstream #275 for the store, #384 for the remote flows), extended at
+`ef65348f` (#513 worktree UI, #570 `env.GIT`). Upstream's plans are checked in and worth reading:
+`cloudflare-os/plans/git-storage.md`, `plans/worktrees.md`, `plans/worktrees-ui.md`,
+`plans/spawner-with-persistence.md`. Paths below are in `workshop-backend/src/` unless stated.
 
 ### 14.1 One store per workspace, not one repo per gadget
 
 The natural guess — each gadget gets its own repo — is wrong, and the design says so explicitly.
 There is **one git object store per workspace**, held in that workspace's Overseer DO, with every
-gadget's history mixed together in it. From `git-store.ts`:
+gadget's history mixed together in it. From `git-store.ts:3`:
 
 > Each workspace's Overseer DO holds a real git object database — SHA-1, zlib-deflated loose
 > objects, byte-identical to what `git` itself would write — stored in the `gitObjects`
 > typed-storage collection.
 
 Gadgets are separated by *history*, not by *storage*: each gadget record points at its own head
-commit (`GadgetRecord.commitId`, `overseer.ts:359`) and its own parent chain, and unrelated DAGs
+commit (`GadgetRecord.commitId`, `overseer.ts:347`) and its own parent chain, and unrelated DAGs
 coexist without interfering because the store is content-addressed. Sharing the store is the point,
 not an accident — gadgets forked from each other, or instantiated from the same blueprint,
 deduplicate at the blob and tree level for free.
@@ -1769,23 +1899,25 @@ The format is genuinely git, not git-shaped. isomorphic-git supplies the object 
 plumbing is used — `writeBlob`/`writeTree`/`writeCommit`/`read*`/`log`, against a gitdir containing
 nothing but `objects/**`. The porcelain is off-limits by decision: `git.commit` hard-requires
 HEAD/index/config, and `git.merge` cannot express the merge behaviour the workspace wants. Upstream
-chose real formats specifically so that code could later be exported to and imported from real
-repositories, and so agents could mount arbitrary repos through gatekeeper-gated push/pull — which
-is exactly what §14.4 turned out to be.
+chose real formats so code could later be exported to and imported from real repositories, and so
+agents could mount arbitrary repos through gatekeeper-gated push/pull — which is §14.4.
 
 Storage properties worth knowing before we build anything large on it:
 
 - **Loose objects only**, one storage record per object, keyed by oid. isomorphic-git never writes
-  deltified data, so each record is a zlib'd whole object. Dedup comes from content addressing, not
-  deltas.
-- **No object exceeds ~2MB today** and nothing enforces that — records hold single source files,
-  small trees and commit headers. Chunking records or spilling large blobs to R2 is noted as a
-  later change local to the fs shim.
+  deltified data. Dedup comes from content addressing, not deltas.
+- **Size limits.** Objects supplied by a gatekeeper (`put()`, `consumePack()`) are capped at
+  **1 MiB** and rejected with `GitObjectTooLargeError` (`MAX_GIT_OBJECT_SIZE`, `git-cache.ts:81`);
+  packs at 64 MiB. Locally written objects are bounded indirectly — a source file is at most 512K
+  UTF-16 units (`MAX_FILE_TEXT_LENGTH`, `workshop-shared/src/code-change.ts:127`) — and the store's
+  own comment still describes a soft ~2 MB ceiling. Spilling large blobs to R2 is noted as later work.
 - **No GC.** Dangling objects come only from accepted merges, imports and migration — never from
-  in-flight chats — and are considered cheap. The roots are enumerable if GC is ever needed.
-- **Commit identity is the real user profile ID**, typically an email; bare usernames (from
-  username/password mode) become `<username>@localhost` as a placeholder until commit identity is
-  customisable.
+  in-flight chats — and are considered cheap. The roots, including blob stamps from agent reads, are
+  enumerable if GC is ever needed.
+- **Commit identity** (`git-store.ts:666`–`678`): the author's name is their display name; the email
+  is their **preferred git email** if set (Settings → `setOwnCommitEmail`), else their id if it
+  contains `@`, else `<id>@localhost`. The preferred email is self-asserted — attribution only, never
+  identity.
 
 ### 14.2 What is *not* involved: Artifacts, R2, refs
 
@@ -1799,8 +1931,8 @@ not a quoted decision.
 `revokeToken`, `fork`. There is no object or file read/write on the binding at all. Content is
 reached the ordinary way — mint a scoped token, then speak git over HTTPS. That is exactly what
 `gatekeeper-context/src/artifact-sync.ts` does for Context collections: `repo.createToken("read",
-3600)`, clone over `isomorphic-git/http/web` with the token as HTTP basic auth, revoke the token
-afterward. Our `context.artifacts` block in `deployment.jsonc` generates a first-class
+3600)` (`:225`), clone over `isomorphic-git/http/web` with the token as HTTP basic auth, revoke the
+token afterward. Our `context.artifacts` block in `deployment.jsonc` generates a first-class
 `artifacts` wrangler binding (`ARTIFACTS`, namespace `veeros-context-collections`) — not a KV
 namespace; `kvNamespaceId` / `CONTEXT_COLLECTIONS` is the separate one.
 
@@ -1825,8 +1957,7 @@ a git fetch, i.e. the Overseer DO leaving the isolate to speak a wire protocol t
 would otherwise read straight out of its own storage. It also mints *repositories*, which is the
 per-gadget-repo model §14.1 explicitly rejected, and it carries a ref layer the workspace
 deliberately does not want (see below). And a write token is a credential to store, rotate and
-revoke — the Context Gatekeeper's handling of exactly that is why `deployment.jsonc` warns that
-Artifacts repository write tokens are credentials.
+revoke — which is why the operator skill treats Artifacts repository write tokens as credentials.
 
 Where Artifacts *would* fit is the direction upstream actually gestures at: the store uses real git
 formats specifically so code can later be exported to and imported from real repositories, and
@@ -1834,9 +1965,8 @@ formats specifically so code can later be exported to and imported from real rep
 plausible future use. Nothing implements it today.
 
 **R2 is not involved either.** The objects live in the Overseer DO's own storage via the
-`gitObjects` typed-storage collection — the same SQLite-backed storage that holds gadget records
-and chats. Our `veeros-blueprint-content` R2 bucket is unaffected. (R2 is named in the design only
-as a *possible future* spill target if objects ever exceed ~2MB.)
+`gitObjects` typed-storage collection (`overseer.ts:1196`) — the same SQLite-backed storage that
+holds gadget records and chats. Our `veeros-blueprint-content` R2 bucket is unaffected.
 
 **There is deliberately no ref layer.** No branches, no tags, no HEAD. The store is objects only.
 What plays the role of refs is the workspace's own records: gadget records, blueprint records, and
@@ -1849,94 +1979,115 @@ tag semantics has to provide them in its own API, which is exactly what the GitH
 The rule is short and worth internalising, because it governs what the agent can and cannot do to
 mainline:
 
-- **Committing to mainline is only ever a fast-forward.** Accept requires that the chat has already
-  merged the gadget's head commit, and then creates a plain commit on top of head.
+- **Committing to mainline is only ever a fast-forward.** Accept (`mergeChanges`, `overseer.ts:4374`)
+  requires that the chat has already merged the gadget's head commit, and then creates a plain commit
+  on top of head; otherwise it returns `stale`.
 - **If mainline moved, you update the chat, not mainline.** A 3-way merge (diff3) of
-  merged-head / head / chat trees is computed and delivered *into the chat*, advancing the chat's
-  merged commit. Conflicts are left inline as ordinary 3-way conflict markers for the user or their
-  agent to clean up, and then accept is retried.
+  merged-head / head / chat trees is computed and delivered *into the chat*
+  (`updateChatFromMainline`, `:4271`), advancing the chat's merged commit. Conflicts are left inline
+  as ordinary 3-way conflict markers for the user or their agent to clean up, and then accept is
+  retried.
 - **Yjs is now only the representation of uncommitted changes within a chat.** CRDT merge across
   divergent bases produces nonsense, so it is explicitly not used for cross-base merging; conflict
   markers are considered better.
-- **Standalone out-of-chat mainline editing is removed.** Editing happens only within chats.
-  (Upstream notes a future agent-less chat as the path back to manual edits.)
+- **Editing happens only within chats.** The code editor lets a user edit only with a chat selected
+  and no agent turn running.
 
 So: the chat *is* the branch, mainline only ever advances by simple commits, and the whole design
 is laid out to allow multi-commit chat sessions later without changing the mainline rule.
 
 ### 14.4 Worktrees — mounting a remote commit
 
-A **worktree** is a new kind of workpiece: a file tree rooted at a git commit, which the agent reads
+A **worktree** is a kind of workpiece: a file tree rooted at a git commit, which the agent reads
 and edits with its ordinary file tools, but which has **no runnable code** — you cannot execute a
 worktree as a gadget. This is the "mount an arbitrary repo" capability the store was built for.
 
-Structurally it reuses everything: worktrees live in the same `gadgets` collection, now generalised
-to a `WorkpieceRecord` with a `type` discriminator (`overseer.ts:398`, `:471`), and their edits ride
-the existing chat OT stream, so read-before-edit, replay and compaction all work unchanged. A
-worktree is **born pinned** at its base commit.
+Structurally it reuses everything: `WorkpieceRecord = GadgetRecord | WorktreeRecord`
+(`overseer.ts:454`; `WorktreeRecord` at `:380`), in the same `gadgets` collection, and their edits
+ride the existing chat OT stream, so read-before-edit, replay and compaction all work unchanged.
 
-Three constraints shape what we can do with them today:
+What shapes their use today:
 
-- **Chat-scoped.** A worktree belongs to the chat that created it and is deleted with the chat.
-  Fresh agents create their own. Workspace-scoped worktrees are possible later but do not ship.
-- **No UI.** Worktrees do not appear in the Workshop UI at all, and worktree *content* is stripped
-  from every client delivery — otherwise the frontend's OT client would fetch an entire repository's
-  base commit on both ends of the wire. Revision numbers are preserved, so the stream stays gapless;
-  a stripped row may just carry an empty change. Worktree *ids* are not hidden, and
-  client-submitted worktree changes are not rejected — "no UI" is a statement about the shipped
-  frontend, not a server-enforced invariant.
-- **Objects arrive lazily.** The workspace pulls what it needs on fault through the owning
-  gatekeeper, typically shallow and filtered (§14.6), rather than cloning a repository up front.
+- **Chat-scoped.** A worktree belongs to the chat that created it and is deleted with the chat
+  (`:386`). Workspace-scoped worktrees still do not ship. **Spawned agents can now create and edit
+  worktrees** (never gadget code).
+- **Pinned on first modification, not at birth.** A worktree carries `pinBase` (the accepted commit),
+  `headCommit` and, when pinned, `baseCommit`. Until the first write or `commit()` it reads lazily as
+  `pinBase`. Accept auto-commits the dirty overlay and advances `pinBase` without re-pinning.
+  Creating a worktree proposes nothing, and reverting the creation rolls back content and head but
+  never deletes the record.
+- **It has a UI** (#513). Worktrees appear in the code editor while their owning chat is selected: a
+  *Changes* list against the review base above a *Files* tree, files loaded lazily into the diff
+  editor, user edits when the agent is idle, and Accept / Discard / per-turn revert exactly as for
+  gadgets — which now share the same browser. The client reads through `Overseer.listTree(commitId)`
+  and `readFilesAtCommit(commitId, paths)`; worktree content is no longer stripped from client
+  delivery.
+- **Objects arrive mostly lazily.** Creation pulls the commit, its full tree structure and blobs up
+  to 64 KiB (`depth: 1`, `git-cache.ts:883`–`905`); larger blobs fault in through the owning
+  gatekeeper (§14.6).
 
-### 14.5 The git flows exposed to the agent
+### 14.5 The git flows exposed to the agent and to gadgets
 
-Two surfaces, and the split matters.
+Three surfaces.
 
 **Tools** (`agent.ts`) — the normal path, and the one the agent is told to prefer:
 
 | Tool | Git-relevant behaviour |
 |---|---|
-| `createWorktree(title, bindingName, commitId)` | Mounts a commit as a file tree under a binding name. `commitId` is a full 40-hex SHA-1 or an unambiguous prefix of ≥4 hex digits, and must already be *known to this workspace* — typically returned by a connection's API. This is also where the initial pull from the owning gatekeeper happens. |
-| `readFile` / `writeFile` / `editFile` | Take a `workpiece` parameter, so they address a gadget or a worktree identically. On an unpinned gadget with committed code, `readFile` reads live at head and stamps the commit so replay can detect staleness; the first `editFile` pins the gadget at the current head. |
-| `describeBinding` | Serves the worktree API below to the agent as text. |
+| `createWorktree(title, bindingName, commitId)` | Mounts a commit as a file tree under a binding name. `commitId` must be a **full 40-hex** id — prefixes are refused (`resolveCommitId`, `git-cache.ts:855`), because commit ids are read capabilities — and already *known to this workspace*, typically from a connection's API. `GIT` cannot be a binding name. |
+| `readFile` / `writeFile` / `editFile` | Take a `workpiece` parameter, so they address a gadget or a worktree identically. `readFile` accepts `startLine`/`lineCount` and ends a window with `[lines A-B of N; next startLine: B+1]`. An unpinned read stamps the blob it saw; the first `editFile` requires that blob to still be head, then pins. |
+| `grep(workpiece, pattern, path?)` | New: a JS regex over a gadget's or worktree's files, `path:line:text` output. |
+| `describeBinding(name, gadget?)` | Serves a binding's API to the agent as text — now also a binding inside a named gadget's env, and `env.GIT`. |
 
-**The `executeCode` worktree binding** (`workshop-backend/src/worktree-binding.d.ts`) — the
-programmatic escape hatch, for anything beyond basic reads and edits:
+Every tool result the model sees is capped at **32K characters**, keeping head and tail
+(`MAX_TOOL_RESULT_CHARS`, `agent.ts:76`); `describeBinding` is exempt. An unwindowed `readFile` of a
+large file returns whole lines up to the cap with a continuation note.
+
+**The worktree binding** (`worktree-binding.d.ts`) — the programmatic escape hatch from
+`executeCode`. All methods are async:
 
 ```ts
-listFiles(path?, {recursive?}): WorktreeFileEntry[]   // kind: file | executable | dir | symlink | submodule
-readFile(path): string
-writeFile(path, text): void        // edited executables keep their bit; new files are non-executable
-deleteFile(path): void
-grep(pattern: RegExp, path?): string                  // `grep -n` format, for humans/agents to read
-structuredGrep(pattern, path?): StructuredGrepResult  // parse this one instead
-commit(message): string            // commits the whole worktree, advances head, returns the new oid
-diff(commitId?): string            // vs. head by default; any commit the workspace knows
+listFiles(path?, {recursive?})                     // kind: file | executable | dir | symlink | submodule
+readFile(path) / writeFile(path, text) / deleteFile(path)   // edited executables keep their bit
+grep(pattern: RegExp, path?: string | string[])    // `grep -n` format, for humans/agents to read
+structuredGrep(pattern, path?)                     // parse this one instead
+commit(message): string                            // commits everything, advances head, returns oid
+diff(commitId?) / structuredDiff(commitId?)        // vs. head by default; full ids only
 ```
 
-The shape of that API is the interesting part:
-
-- **There is no staging area.** `commit()` takes everything you have changed in the worktree. No
-  index, no `git add`.
+- **There is no staging area.** `commit()` takes everything you have changed. No index, no `git add`.
 - **There is no branch, checkout, or ref anything** — consistent with §14.2. The worktree has a
-  head, and `commit()` moves it. That is the entire ref surface.
-- **`merge` and `reset` are explicitly TODO.** Upstream's note says a hard reset is better
-  accomplished by creating a new worktree from the base commit, which is cheap.
-- **Symlinks and submodules are visible but inert.** They appear in `listFiles` with their own
-  `kind`, and file operations on them throw a descriptive error naming the symlink's target or the
-  submodule's pinned commit. Searches skip them with a note.
+  head, and `commit()` moves it.
+- **`merge` and *soft* reset are TODO.** A hard reset is better done by creating a new worktree from
+  the base commit, which is cheap.
+- **`structuredDiff()`** returns `{files, errors}` with per-file status and numbered hunk lines —
+  meant for UIs. Renames appear as remove + add.
+- **Symlinks and submodules are visible but inert** — listed with their own `kind`; file operations
+  on them throw a descriptive error.
+
+**`env.GIT`** (#570; `Git` in `worktree-binding.d.ts:25`, `git-binding.ts:116`) — in every gadget env
+and every agent `executeCode` env, unless a named binding shadows it:
+
+```ts
+newWorktree(commitId): Promise<Worktree>      // transient, in-memory; commits persist, edits don't
+readCommit(commitId): Promise<CommitMetadata> // parents, message, author, committer; no checkout
+```
+
+Both require full 40-hex ids. `GIT` is reserved: binding or renaming to it is refused, new spawner
+configs reject it, and legacy seeds using it are renamed. For agents, `createWorktree` remains the
+preferred path; `env.GIT` is for gadget code that manipulates commits.
 
 So the agent's loop against a real repository is: ask a gatekeeper for a commit id → `createWorktree`
-on it → read/edit with the ordinary file tools (or `executeCode` for bulk work) → `commit()` →
-hand the resulting oid back to the gatekeeper to push or open a PR. Nothing in that loop lets the
-agent reach a remote directly; the gatekeeper is the only door, and §14.6 is what it opens onto.
+on it → read/edit/grep with the ordinary tools (or `executeCode` for bulk work) → `commit()` → hand
+the resulting oid back to the gatekeeper to push or open a PR. Nothing in that loop lets the agent
+reach a remote directly; the gatekeeper is the only door, and §14.6 is what it opens onto.
 
 ### 14.6 `GitCache` — the gatekeeper side
 
-`GitCache` (`workshop-shared/src/gatekeeper.ts:1412`) is how a gatekeeper populates and reads the
-workspace's object store. Any gatekeeper offering access to a remote repo is expected to implement
-`Gatekeeper.gitPull()` alongside it (`:826`), because the workspace may evict objects and expects to
-repopulate them from the same gatekeeper on demand.
+`GitCache` (`gatekeeper.ts:1570`) is how a gatekeeper populates and reads the workspace's object
+store. Any gatekeeper offering access to a remote repo **must** implement `Gatekeeper.gitPull()`
+alongside it (`:904`), because the workspace may evict objects and expects to repopulate them from
+the same gatekeeper on demand.
 
 ```ts
 get(id, hints?)        // null outside this gatekeeper's scoped view
@@ -1956,51 +2107,68 @@ Three design choices are worth carrying into anything we build:
   gatekeeper's view, since the caller already holds both oids.
 - **Every stub is scoped to the gatekeeper it was handed to**, and answers for exactly two sets:
   objects that gatekeeper `put()` or successfully pushed, and objects *queued* for push by a
-  submitted-but-unapplied action (`ActionDescription.pushedCommits`, `:1215`). That second set is
+  submitted-but-unapplied action (`ActionDescription.pushedCommits`, `:1373`). That second set is
   what makes simulation (§8.3) work for git: a commit pending push reads back as though it had
-  already landed, so a gatekeeper simulating "read back the commit I just pushed" gets the right
-  answer without the push having happened.
-- **Pulls are shallow and filtered by default.** `GitPullHints` carries the object type, what
-  referenced it, a `commitHistory` of `full` / `depth` / `since` — required, precisely because "the
-  intuitive default would be a full clone, but that is almost never what we want" — and
-  `filterBlobSize` / `filterTreeDepth`. Hints are advisory; honouring them affects performance,
-  not correctness.
+  already landed.
+- **Pulls are shallow and filtered by default.** `GitPullHints` (`:1673`) carries the object type,
+  what referenced it, a `commitHistory` of `full` / `depth` / `since` — required, precisely because
+  "the intuitive default would be a full clone, but that is almost never what we want" — and
+  `filterBlobSize` / `filterTreeDepth`. Hints are advisory.
 
 The GitHub gatekeeper implements this against the **real git smart-HTTP v2 protocol**, not the REST
 API: `gatekeeper-github/src/git-transport.ts` composes pkt-line framing, fetch commands and sideband
 demultiplexing for pulls, and a send-pack ref-update block for pushes, with the pack bytes coming
 from `GitCache.buildPack()` and going into `consumePack()`. Two locked decisions: it never sends
 `have`s (every pull is filtered or tree-limited, so possessing a commit never implies possessing its
-blobs), and at most one `filter` line per fetch (upload-pack accepts a single filter-spec). Transfers
-are capped at 64MB. The gatekeeper handles framing only and retains nothing locally.
+blobs), and at most one `filter` line per fetch. Transfers are capped at 64MB. The gatekeeper handles
+framing only and retains nothing locally.
 
-Its agent-facing repository API is where branches and tags come back, since the store itself has
-none: `listBranches`, `listTags`, `resolveRef(ref?)`, `getCommit(ref?)`, `listCommits(filter?)`,
+Its agent-facing repository API is where branches and tags come back (`gatekeeper-github/src/types.d.ts`):
+`listBranches`, `listTags`, `resolveRef(ref?)`, `getCommit(ref?)`, `listCommits(options?)`,
 `push(branch, commitId, {force?})`, plus PR operations. Every commit id it returns is advertised
-through `advertiseCommit()` so the workspace knows where to pull it from — except ids that are only
-*pending push*, which are withheld deliberately, since the hint would outlive a rejection.
+through `advertiseCommit()` — except ids that are only *pending push*, which are withheld
+deliberately, since the hint would outlive a rejection.
 
-**Push is an approval-gated action, not a call.** `push()` validates the branch name, refuses a
-truncated commit id outright, reads the branch's current head as an authorized observation to bind
-the expected old sha, and then submits an action carrying `pushedCommits: [commitId]` and
-`implementsRevert: true`. Its description names the repository and the branch's current head, and a
-force push says so explicitly: *"This is a force push: it rewrites the branch's history."* So an
-agent pushing to a real repo lands in the same ApprovalQueue as any other side effect (§8.2), with
-the fast-forward requirement validated at queue time via `isAncestor` before the action is even
-submitted.
+**Push is an approval-gated action, not a call** (`github.ts:5494`). `push()` validates the branch
+name, refuses a non-40-character commit id, reads the branch's current head as an authorized
+observation to bind the expected old sha, checks fast-forward via `isAncestor`, and submits an action
+carrying `pushedCommits: [commitId]` and `implementsRevert: true`. Its description reads *"Push commit
+X to branch Y of repo, moving the branch from its current head Z."*, and a force push adds *"This is a
+force push: it rewrites the branch's history."* **In a restricted-data workspace every push is
+refused outright** (§8.2); a push description is never `descriptionIsComplete`.
 
-### 14.7 What this means for us
+### 14.7 Spawned agents
+
+Gadgets can start agents through the agent-spawner binding (`agent-spawner-binding.d.ts`). #492
+rebuilt callable agents to survive restarts, and **the API broke**:
+
+- `spawn(title, prompt)` is unchanged. **`spawnCallable(title, {types, mainType})`** replaced
+  `spawnCallable(title, prompt)`: the gadget supplies TypeScript declarations (doc comments explain
+  each call) and the implemented interface's name; the kernel frames the prompt. The old string form
+  throws *"spawnCallable(title, prompt) has been replaced…"*.
+- **Calls are durable jobs, not RPCs.** A method call resolves once recorded; there is **no return
+  value and no completion notification**. A gadget that wants a result defines a callback in the
+  interface.
+- **Every stub in the arguments must be persistent** (`ctx.restore()`); transient stubs are refused
+  (*"Arguments to a callable agent must be storable…"*).
+- The returned stub can be stored in DO storage to call the same agent again. Arguments reach the
+  agent as `env.<method>_ARGS`.
+- Spawned agents get a restricted tool set — `readFile`, `grep`, `writeFile`, `editFile`,
+  `createWorktree`, `webFetch`, `observeUserChanges`, `describeBinding`, `executeCode` — and may edit
+  worktrees but never gadget code.
+
+### 14.8 What this means for us
 
 - **The §12 Context-collection plan is unaffected.** A git-backed Context collection still goes
-  through Artifacts and `artifact-sync.ts` (§14.2). Nothing about the workspace git store changes
-  how `skills/<name>/SKILL.md` folders get ingested.
+  through Artifacts and `artifact-sync.ts` (§14.2).
 - **A `gatekeeper-basecamp5` gets a new obligation if it ever returns commit ids** — implement
   `gitPull()`, or don't hand out oids. For a Basecamp gatekeeper this is moot; for anything wrapping
   a code host it is the main structural requirement.
-- **"Agent edits our repo and opens a PR" is now a shipped path**, not a sketch — but it needs the
-  GitHub gatekeeper connected and an OAuth app registered, and every push is an approval prompt. As
-  a workflow that is a real option for the client-portal work in §11.1; as an *unattended* workflow
-  it is not, by design.
-- **Watch the ~2MB object ceiling and the absence of GC** before mounting anything large. Neither
-  is enforced, and the media-service sketch in §11.2 should keep binaries in R2 rather than anywhere
-  near a worktree.
+- **"Agent edits our repo and opens a PR" is a shipped path**, now with a UI to review the worktree
+  before accepting — but it needs the GitHub gatekeeper connected and an OAuth app registered, every
+  push is an approval prompt, and pushes are impossible from any workspace that has seen restricted
+  data. As an *unattended* workflow it is not an option, by design.
+- **Blueprints can do git now.** `env.GIT` gives our own gadget code commit inspection and transient
+  worktrees — relevant if a kanban or board blueprint ever wants to show repository activity.
+- **Keep binaries out of the git store.** Gatekeeper-supplied objects stop at 1 MiB and nothing is
+  ever collected; the §11.2 media sketch should keep bytes in R2, nowhere near a worktree.

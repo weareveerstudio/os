@@ -11,9 +11,11 @@ Unqualified `overseer.ts` / `gatekeeper.ts` mean `workshop-backend/src/overseer.
 
 **Status.**
 
-- **Live:** pin `b304e8c2`, deployed 2026-10-06 12:17–12:23 UTC from root `dd06ecd` (§13.1).
-  CLI-checkable verification passed; the authenticated browser checks are outstanding (§12).
-- **Previous:** pin `ef65348f`, deployed 2026-09-29 (§13.2) — the rollback baseline.
+- **Live:** pin `b304e8c2` plus the GitHub Gatekeeper, deployed 2026-10-06 14:28–14:33 UTC from
+  root `962fed3` (§1.6). CLI-checkable verification passed. GitHub has no OAuth App or secrets yet,
+  and the authenticated browser checks are outstanding (§12).
+- **Previous:** the same pin without GitHub, deployed 2026-10-06 12:17–12:23 UTC from `dd06ecd`
+  (§13.1) — the rollback baseline. Before that, `ef65348f` (2026-09-29, §13.2).
 - `file:line` references below were verified at `ef65348f`, not re-verified at `b304e8c2`.
 
 ---
@@ -61,8 +63,9 @@ Unqualified `overseer.ts` / `gatekeeper.ts` mean `workshop-backend/src/overseer.
 ## 1. Deployment: what the wrapper changes
 
 This deployment was created by the hosted flow (`os.cloudflare.app/deploy`) and ejected to this
-starter repo. Four problems had to be solved before `pnpm deploy` was safe to run; the fixes are
-still the wrapper's only functional divergence from `cloudflare/cloudflare-os-starter`.
+starter repo. Four problems had to be solved before `pnpm deploy` was safe to run (§1.1–1.4), and
+§1.6 adds two upstream Gatekeepers the starter does not deploy. Together these are the wrapper's only
+functional divergence from `cloudflare/cloudflare-os-starter`.
 
 ### 1.1 The MCP Gatekeeper would have been silently orphaned
 
@@ -135,14 +138,92 @@ parsed into a `Set`.
 
 `scripts/deploy.test.ts` gained four cases covering the new paths — a disabled Gatekeeper dropping
 out of *both* binding lists, an enabled one still requiring a Worker name, build steps skipped when
-disabled, and MCP's `BASE_URL` / `MCP_ALLOW_INSECURE` vars. **30/30 pass** (still, at `ef65348f`).
+disabled, and MCP's `BASE_URL` / `MCP_ALLOW_INSECURE` vars. **30/30 pass** (still, at `ef65348f`);
+**37/37** after §1.6.
+
+### 1.6 GitHub and Email Gatekeepers, and the vendor-Gatekeeper table
+
+**What.** The upstream GitHub Gatekeeper (`cloudflare-os/packages/gatekeeper-github`,
+`@gadgets/github-gatekeeper`) is deployed as `veeros-gk-github`. The Email Gatekeeper
+(`gatekeeper-email`, `@gadgets/email-gatekeeper`) is wired the same way but `email.enabled: false`,
+so nothing about it is built, deployed or bound. Commit `962fed3` (branch `feat/github-gatekeeper`).
+
+**One table instead of three copies.** MCP, GitHub and Email are the same shape to the wrapper: an
+`enabled` flag, a Worker name, and a `BASE_URL` derived from the public origin; no props, no storage
+bindings of their own. `scripts/deploy.ts` now drives all three from `vendorGatekeepers` (key,
+binding, pnpm package). Each one gets everything §1.1 gave MCP — required `workers.<key>.name` when
+enabled, placeholder stripping and uniqueness only when enabled, a bare router binding, a
+`GatekeeperVendor` Workshop binding, one `vp run --no-cache build` (all three `build`s are the shared
+configurator task with `dependsOn: ["build:configurator"]`), and a deploy slot after MCP and before
+the custom Gatekeeper. The path is derived from the binding by the router's own rule
+(`GATEKEEPER_GITHUB` → `/gatekeeper/github`), so `BASE_URL` cannot disagree with it. **MCP's
+generated config is byte-identical to before** (diffed against the pre-change output), and its
+position in both binding lists is unchanged; Context and Scheduler are untouched.
+
+That also closes §1.2's rule for this class: a Gatekeeper in the table gets `BASE_URL`
+automatically. One wired any other way still does not.
+
+**GitHub's credentials are not in the config.** It reads `CLIENT_ID` and `CLIENT_SECRET` (upstream
+`deploy-inputs.json` marks both secrets). They are deliberately *not* in `secrets.required` —
+wrangler would then refuse the first deploy, before the Worker they belong to exists. Instead
+`pnpm deploy` prints, after the router deploy, the callback URL and the two `secret put` commands.
+Until they are installed the Worker is harmless: `describe()` needs no secrets, so GitHub should
+already be listed as a connector (not checked in a browser), and a connect attempt gets upstream's
+"not configured" page. It advertises
+`providesAuth`, but sign-in through a Gatekeeper is opt-in via `AUTH_GATEKEEPERS`, which the wrapper
+does not set, so the Access sign-in boundary is unchanged. **Authority to know about:** the connect
+scope is `repo`, `read:user`, `user:email` — `repo` is read/write on every repository the
+connecting user can reach, gated per action by approval prompts (§8.2).
+
+**Email stays off** pending the Email Routing decision (which addresses, on which zone) and the
+`getEmailHost` display issue (§9.5). Enabling it is `"email": { "enabled": true }` plus uncommenting
+`workers.email` — the generated `BASE_URL` would be `https://os.veer.studio/gatekeeper/email`.
+
+**Tests.** Seven new cases: GitHub enabled → bare on the router, `GatekeeperVendor` with no props on
+the Workshop, `BASE_URL` derived (custom domain and workers.dev), no `secrets.required`, one build
+step; GitHub disabled → absent from both lists and the build; Email disabled by default → absent;
+Email enabled → its own `BASE_URL` and the binding order; MCP's output unchanged with both others on;
+validation of the new blocks. The fixture keeps both off, so every pre-existing assertion is
+untouched.
+
+**Deploy record.** Deployed 2026-10-06 14:28–14:33 UTC, account `cae2b6350c3a5a8bc9451652ffb0c9d7`,
+route `os.veer.studio`, from root commit `962fed3` / submodule `b304e8c2`. `pnpm lint`, `pnpm check`
+(37/37; router and backend dry-runs listing `GATEKEEPER_GITHUB`, no email anywhere, generated
+configs removed) and `pnpm test` passed first. The live versions were re-read immediately before and
+matched §13.1's exactly; `veeros-gk-github` did not exist. All six active Workers deployed in the
+script's order, exit 0.
+
+| Worker | Previous version (rollback target) | New version |
+|---|---|---|
+| `veeros-gk-context` | `8a597940-4016-4872-9d0e-09242537a86e` | `1b7f16e1-6c98-4886-a351-9c30a40d0281` |
+| `veeros-gk-scheduler` | `7efc47af-e27a-44c4-8604-cd810d9bac02` | `8f8ea631-4edd-4b51-bb04-d2d75c90a276` |
+| `veeros-gk-mcp` | `d25238aa-8803-4106-82b8-a3ea6beaaf10` | `f5d3ce61-f3b5-4ed3-9c3b-6916d636ccdc` |
+| `veeros-gk-github` | — (new Worker, DO migration `v0`: `UserAccount`, `GitHubGatekeeperImpl`) | `7afc511c-3697-4b4c-8253-4c3fccf4dc32` |
+| `veeros-backend` | `10cea740-8393-43ba-bdb3-4ee02049f07c` | `91e63709-38f6-47b0-be19-73e7977bb394` |
+| `veeros` (router) | `396ae1c7-0d45-4c89-b084-4f793b6d0409` | `85bd528c-f5cd-4886-9c7a-ac5f992d7df8` |
+
+**Verified after deploy:** valid TLS on `os.veer.studio`; unauthenticated requests to `/`, `/api/`,
+`/admin`, `/gatekeeper/github`, `/gatekeeper/github/oauth` and `/gatekeeper/mcp` all 302 to
+`veerstudio.cloudflareaccess.com` carrying the configured audience; every Worker but the router
+reported *"No targets deployed"*, `veeros-gk-github` included; `versions view` of the new backend
+and router differs from the previous versions by exactly one line each, the added
+`GATEKEEPER_GITHUB` binding (`veeros-gk-github#GatekeeperVendor` / bare `veeros-gk-github`);
+Context, Scheduler and MCP versions are identical to their predecessors apart from ID and time; the
+GitHub version carries `BASE_URL = "https://os.veer.studio/gatekeeper/github"` and no other binding.
+**Not verified:** a GitHub connect (no OAuth App exists yet) and everything needing an authenticated
+browser session (§12).
+
+**Rollback.** Context, Scheduler and MCP changed nothing but the version, so they need none. Rolling
+the backend and router back to the previous versions above unbinds GitHub; `veeros-gk-github` can
+then stay deployed and unbound — never delete it once an account is connected, since its Durable
+Objects hold the grants.
 
 ---
 
 ## 2. Live account inventory
 
-Verified against the account on 2026-10-06, before and after the `b304e8c2` deploy (`wrangler
-whoami`, `deployments list`, `secret list`, `versions view`).
+Verified against the account on 2026-10-06, before and after the `b304e8c2` deploy and the GitHub
+Gatekeeper deploy (`wrangler whoami`, `deployments list`, `secret list`, `versions view`).
 
 | Item | Value |
 |---|---|
@@ -152,18 +233,20 @@ whoami`, `deployments list`, `secret list`, `versions view`).
 
 ### Workers
 
-All five were deployed 2026-10-06 12:17–12:23 UTC at pin `b304e8c2`. The previous column holds the
-`ef65348f` versions — the rollback targets, subject to the caveats in §13.1.
+All six were deployed 2026-10-06 14:28–14:33 UTC at pin `b304e8c2` from root `962fed3` (§1.6). The
+previous column holds the 12:17–12:23 versions of the same pin, without GitHub — the rollback
+targets. The `ef65348f` versions before those are in §13.1, with its caveats.
 
 | Worker | Role | Live version | Previous version |
 |---|---|---|---|
-| `veeros` | Router — the only public route | `396ae1c7-0d45-4c89-b084-4f793b6d0409` | `94c4fd56-e271-4338-b19d-e2cd5bae16ac` |
-| `veeros-backend` | Workshop — **all user data** (Durable Objects) | `10cea740-8393-43ba-bdb3-4ee02049f07c` | `022aebcc-4a8c-45db-a5e9-b7d26f07edd5` |
-| `veeros-gk-context` | Context Gatekeeper | `8a597940-4016-4872-9d0e-09242537a86e` | `25fbbd55-bcf1-412d-a666-644800eb52ee` |
-| `veeros-gk-scheduler` | Scheduler Gatekeeper | `7efc47af-e27a-44c4-8604-cd810d9bac02` | `90e3a47d-1563-4538-a0c2-145f02c61e4b` |
-| `veeros-gk-mcp` | MCP Gatekeeper | `d25238aa-8803-4106-82b8-a3ea6beaaf10` | `d717fc33-6b94-4cfb-a2d5-815d62b69f57` |
+| `veeros` | Router — the only public route | `85bd528c-f5cd-4886-9c7a-ac5f992d7df8` | `396ae1c7-0d45-4c89-b084-4f793b6d0409` |
+| `veeros-backend` | Workshop — **all user data** (Durable Objects) | `91e63709-38f6-47b0-be19-73e7977bb394` | `10cea740-8393-43ba-bdb3-4ee02049f07c` |
+| `veeros-gk-context` | Context Gatekeeper | `1b7f16e1-6c98-4886-a351-9c30a40d0281` | `8a597940-4016-4872-9d0e-09242537a86e` |
+| `veeros-gk-scheduler` | Scheduler Gatekeeper | `8f8ea631-4edd-4b51-bb04-d2d75c90a276` | `7efc47af-e27a-44c4-8604-cd810d9bac02` |
+| `veeros-gk-mcp` | MCP Gatekeeper | `f5d3ce61-f3b5-4ed3-9c3b-6916d636ccdc` | `d25238aa-8803-4106-82b8-a3ea6beaaf10` |
+| `veeros-gk-github` | GitHub Gatekeeper — no secrets yet (§12) | `7afc511c-3697-4b4c-8253-4c3fccf4dc32` | — (new) |
 
-Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
+Email Gatekeeper, Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
 `wrangler deployments list` prints **oldest-first**; the current version is the *last* entry.
 
 ### Storage
@@ -191,6 +274,9 @@ storage schema is at version 5 from `b304e8c2` on each workspace's first wake (�
   instance's origin — the Context data boundary was preserved. Had the hosted instance been on
   `workers.dev`, this would have silently hidden all collections.
 - Local Node is 24.15.0 against a declared `>=24.19.0`. Only a warning.
+- `veeros-gk-github` carries no `CLIENT_ID` / `CLIENT_SECRET` yet; until it does, a connect attempt
+  shows upstream's "not configured" page. Its OAuth callback, `/gatekeeper/github/oauth`, sits behind
+  Access like every router path — fine for a browser redirect from a signed-in user.
 
 ---
 
@@ -1325,9 +1411,10 @@ const NOT_INSTALLABLE = new Set(["gatekeeper-email"]);
 ```
 
 **That blocker does not apply to us** — `veer.studio` is a real zone with the router already on it.
-But it is also absent from this wrapper's `packageDirs` (`scripts/deploy.ts:22-30`), so wiring it
-needs the same treatment MCP got: a `packageDirs` entry, `workers.email.name`, an `email.enabled`
-flag, `GATEKEEPER_EMAIL` in the router's service list, a build command, and `BASE_URL`.
+It is now wired in this wrapper — a row in the vendor-Gatekeeper table, `GATEKEEPER_EMAIL` on both
+binding lists, a build step, and a derived `BASE_URL` (§1.6) — but `email.enabled: false` until the
+Email Routing rules are decided. Still outside the wrapper: the Email Routing DNS and rules on the
+zone.
 
 `BASE_URL` matters more here than for MCP. It is simultaneously the resource-URL namespace *and* the
 fetch-handler path prefix, and `getGatekeeperClassFor` rejects any URL whose origin does not match
@@ -1624,8 +1711,16 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 ### Decided, not yet done
 
-- **Authenticated verification of the `b304e8c2` deploy.** The CLI-checkable items passed (§13.1);
-  the browser ones have not run for this deploy or the two before it — `/admin` positive and
+- **Finish the GitHub Gatekeeper** (deployed 2026-10-06, §1.6). Create a GitHub **OAuth App** (not
+  a GitHub App) under the `weareveerstudio` org, homepage `https://os.veer.studio`, authorization
+  callback URL `https://os.veer.studio/gatekeeper/github/oauth`. Install its credentials
+  interactively — each `secret put` deploys a new `veeros-gk-github` version, so record both IDs:
+  `CLOUDFLARE_ACCOUNT_ID=cae2b6350c3a5a8bc9451652ffb0c9d7 pnpm exec wrangler secret put CLIENT_ID --name veeros-gk-github`,
+  then the same for `CLIENT_SECRET`. Then verify a connect end-to-end from an authenticated session
+  (connect, read a repository and see the read observed, disconnect). The connect scope includes
+  `repo`.
+- **Authenticated verification of the `b304e8c2` deploy.** The CLI-checkable items passed (§13.1,
+  and again after §1.6); the browser ones have not run for this deploy or the three before it — `/admin` positive and
   negative, a denied identity, the model picker and the new `/admin` Models tab, schedules still
   listed and a new one firing, the Context catalog in a new chat, and an end-to-end connect through
   the handoff flow. Do these before relying on any connector.
@@ -1648,8 +1743,9 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 - `veeros-gk-billing` scaffold — auto-provisioned Gatekeeper with `providesUi` and a stub portal
 - `veeros-gk-media` — R2 + Images/Stream, built on the `gatekeeper-email` "is the service" pattern
   (§11.2). Decide the public-URL question before writing code.
-- `gatekeeper-email` — shipped upstream but absent from `packageDirs`; installable for us because we
-  hold a zone. Needs `BASE_URL`, a `GATEKEEPER_EMAIL` router binding, and Email Routing DNS.
+- `gatekeeper-email` — wired but disabled (`email.enabled: false`, §1.6), pending the Email Routing
+  decision: which addresses on which zone, and living with `getEmailHost`'s wrong displayed host
+  (§9.5). Enabling it is the flag, `workers.email` uncommented, and Email Routing DNS and rules.
 - `gatekeeper-basecamp5` — on `gatekeeper-kit` (§9.4)
 - Connecting `gatekeeper-cloudflare` for Workers Observability
 - Removing the unused `CF_AI_GATEWAY_API_TOKEN` secret from `veeros-backend` (a `secret delete`
@@ -1664,8 +1760,8 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 - **Upgrades reshape our workspace, not just versions** — keep catalog entries byte-identical, and
   expect new members and new `catalog:` specifiers from the three submodule packages we host
   (§8.6, §13.2, §13.4).
-- **`README.md` says "The deployment is six Workers"** — stale; the count is configurable (five
-  active here)
+- **`README.md` says "The deployment is six Workers"** — stale; the count is configurable (six
+  active here, but not the six it lists: MCP and GitHub instead of the custom Gatekeeper and Reporter)
 - **`deploy.ts` reads a generated file.** Since `b304e8c2` each Worker's config is authored in
   `cloudflare.config.ts`; the `wrangler.jsonc` our wrapper reads is generated from it and committed
   (§13.1). If upstream stops committing it, `deploy.ts` breaks — check for it on every bump.
@@ -1673,7 +1769,8 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
   nothing, so `recordAnalytics` writes nowhere. Enabling it is a wrapper change (§13.1).
 - **Toolchain drift** — our top-level Wrangler resolved to 4.143.0 while the submodule pins 4.138.0.
   Dry-runs and deploys run the submodule's; ours is used only for `whoami`/`secret`/`deployments`.
-- **Any future OAuth Gatekeeper** needs `BASE_URL` (nothing enforces it), relies on the backend's
+- **Any future OAuth Gatekeeper** needs `BASE_URL` (automatic for a row in the vendor-Gatekeeper
+  table, §1.6; nothing enforces it otherwise), relies on the backend's
   `PUBLIC_BASE_URL`, and must implement the connect handoff (`complete()` → `ConnectHandoff`,
   `reconnectComplete()`, `commitReconnect()`).
 - **Typed-storage property names are storage keys** — renaming a persisted field is a migration
@@ -1729,6 +1826,8 @@ all 302 to `veerstudio.cloudflareaccess.com` carrying the configured audience; e
 reported *"No targets deployed"* — the Router holds the only route; the new backend version carries
 compatibility date `2026-09-04`, the same flags, and the same storage, gatekeeper, AI and Access
 bindings as before. **Not verified:** everything needing an authenticated browser session (§12).
+Superseded the same afternoon by the GitHub Gatekeeper deploy on this pin (§1.6), whose rollback
+targets are these versions.
 
 #### What the wrapper had to change
 

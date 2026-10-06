@@ -11,9 +11,10 @@ Unqualified `overseer.ts` / `gatekeeper.ts` mean `workshop-backend/src/overseer.
 
 **Status.**
 
-- **Live:** pin `ef65348f`, deployed 2026-09-29 15:08–15:12 UTC from root `0558097` (§13.1).
+- **Live:** pin `b304e8c2`, deployed 2026-10-06 12:17–12:23 UTC from root `dd06ecd` (§13.1).
   CLI-checkable verification passed; the authenticated browser checks are outstanding (§12).
-- **Previous:** pin `08afe059`, deployed 2026-09-13 (§13.2) — the rollback baseline.
+- **Previous:** pin `ef65348f`, deployed 2026-09-29 (§13.2) — the rollback baseline.
+- `file:line` references below were verified at `ef65348f`, not re-verified at `b304e8c2`.
 
 ---
 
@@ -41,9 +42,10 @@ Unqualified `overseer.ts` / `gatekeeper.ts` mean `workshop-backend/src/overseer.
     - 11.2 [Media service on R2](#112-media-service-on-r2)
 12. [Open items](#12-open-items)
 13. [Upgrade log](#13-upgrade-log)
-    - 13.1 [`08afe059` → `ef65348f` (2026-09-29) — deployed](#131-08afe059--ef65348f-2026-09-29--deployed)
-    - 13.2 [`54d5d8b0` → `08afe059` (2026-09-13) — deployed](#132-54d5d8b0--08afe059-2026-09-13--deployed)
-    - 13.3 [`6478a144` → `54d5d8b0` (2026-09-09) — deployed 2026-09-10](#133-6478a144--54d5d8b0-2026-09-09--deployed-2026-09-10)
+    - 13.1 [`ef65348f` → `b304e8c2` (2026-10-06) — deployed](#131-ef65348f--b304e8c2-2026-10-06--deployed)
+    - 13.2 [`08afe059` → `ef65348f` (2026-09-29) — deployed](#132-08afe059--ef65348f-2026-09-29--deployed)
+    - 13.3 [`54d5d8b0` → `08afe059` (2026-09-13) — deployed](#133-54d5d8b0--08afe059-2026-09-13--deployed)
+    - 13.4 [`6478a144` → `54d5d8b0` (2026-09-09) — deployed 2026-09-10](#134-6478a144--54d5d8b0-2026-09-09--deployed-2026-09-10)
 14. [Git-backed code storage and worktrees](#14-git-backed-code-storage-and-worktrees)
     - 14.1 [One store per workspace, not one repo per gadget](#141-one-store-per-workspace-not-one-repo-per-gadget)
     - 14.2 [What is *not* involved: Artifacts, R2, refs](#142-what-is-not-involved-artifacts-r2-refs)
@@ -116,7 +118,7 @@ in `packages/custom-gatekeeper/` for a later iteration; nothing is built, deploy
 
 **Side effect: `pnpm check` never compiles a disabled package.** Only `pnpm lint` type-checks
 `packages/custom-gatekeeper`. That is how a Gatekeeper-contract change left it failing to compile
-for a whole pin without anyone noticing (§13.1). Run `pnpm lint` on every bump.
+for a whole pin without anyone noticing (§13.2). Run `pnpm lint` on every bump.
 
 ### 1.4 AI Gateway name was wrong
 
@@ -139,7 +141,7 @@ disabled, and MCP's `BASE_URL` / `MCP_ALLOW_INSECURE` vars. **30/30 pass** (stil
 
 ## 2. Live account inventory
 
-Verified against the account on 2026-09-29, before and after the `ef65348f` deploy (`wrangler
+Verified against the account on 2026-10-06, before and after the `b304e8c2` deploy (`wrangler
 whoami`, `deployments list`, `secret list`, `versions view`).
 
 | Item | Value |
@@ -150,16 +152,16 @@ whoami`, `deployments list`, `secret list`, `versions view`).
 
 ### Workers
 
-All five were deployed 2026-09-29 15:08–15:12 UTC at pin `ef65348f`. The previous column holds the
-`08afe059` versions — the rollback targets, subject to the caveat in §13.1.
+All five were deployed 2026-10-06 12:17–12:23 UTC at pin `b304e8c2`. The previous column holds the
+`ef65348f` versions — the rollback targets, subject to the caveats in §13.1.
 
 | Worker | Role | Live version | Previous version |
 |---|---|---|---|
-| `veeros` | Router — the only public route | `94c4fd56-e271-4338-b19d-e2cd5bae16ac` | `593eba4d-a7bd-4239-9ff8-d0e663fb9a4f` |
-| `veeros-backend` | Workshop — **all user data** (Durable Objects) | `022aebcc-4a8c-45db-a5e9-b7d26f07edd5` | `07d644e5-e59c-4621-a8f9-14005b0282c7` |
-| `veeros-gk-context` | Context Gatekeeper | `25fbbd55-bcf1-412d-a666-644800eb52ee` | `31f55ebd-5526-47ed-977d-05b18e6fa4fa` |
-| `veeros-gk-scheduler` | Scheduler Gatekeeper | `90e3a47d-1563-4538-a0c2-145f02c61e4b` | `c348f02c-43d8-4a11-bd96-6dd6f4dda510` |
-| `veeros-gk-mcp` | MCP Gatekeeper | `d717fc33-6b94-4cfb-a2d5-815d62b69f57` | `1ff0187f-dcf5-42bd-9c40-2d82143840d4` |
+| `veeros` | Router — the only public route | `396ae1c7-0d45-4c89-b084-4f793b6d0409` | `94c4fd56-e271-4338-b19d-e2cd5bae16ac` |
+| `veeros-backend` | Workshop — **all user data** (Durable Objects) | `10cea740-8393-43ba-bdb3-4ee02049f07c` | `022aebcc-4a8c-45db-a5e9-b7d26f07edd5` |
+| `veeros-gk-context` | Context Gatekeeper | `8a597940-4016-4872-9d0e-09242537a86e` | `25fbbd55-bcf1-412d-a666-644800eb52ee` |
+| `veeros-gk-scheduler` | Scheduler Gatekeeper | `7efc47af-e27a-44c4-8604-cd810d9bac02` | `90e3a47d-1563-4538-a0c2-145f02c61e4b` |
+| `veeros-gk-mcp` | MCP Gatekeeper | `d25238aa-8803-4106-82b8-a3ea6beaaf10` | `d717fc33-6b94-4cfb-a2d5-815d62b69f57` |
 
 Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
 `wrangler deployments list` prints **oldest-first**; the current version is the *last* entry.
@@ -175,12 +177,13 @@ Custom Gatekeeper and Error Reporter are disabled — not deployed, not bound.
 | `ARTIFACTS` | `veeros-context-collections` (Artifacts namespace; `context.artifacts.enabled: true`) |
 
 Workshop Durable Object migrations live: `v0`–`v3`, all additive `new_sqlite_classes` — `v3`
-(`UserDirectoryDurableObject`) arrived with `ef65348f` (§13.1).
+(`UserDirectoryDurableObject`) arrived with `ef65348f` (§13.2). Separately, the Overseer's own
+storage schema is at version 5 from `b304e8c2` on each workspace's first wake (§13.1).
 
 ### Notes
 
 - The Workshop still carries a leftover `CF_AI_GATEWAY_API_TOKEN` secret from the hosted flow
-  (present 2026-09-29). It survives deploys and is **unused** — transport picks the `WORKERS_AI`
+  (present 2026-10-06). It survives deploys and is **unused** — transport picks the `WORKERS_AI`
   binding unless `CF_AI_GATEWAY_USE_BINDING=false`.
 - `DEPLOY_URL` was dropped, removing the "manage this deployment" link. Expected; documented in
   `docs/migrate-from-hosted.md` §7.
@@ -587,7 +590,7 @@ sign-in.
 Sign-in requests minimal scopes and the grant **self-destructs** after the email is read — except
 Cloudflare, which requests full scopes and keeps the grant as a connected account
 (`server.ts:714`; `auth/login-flow.ts:233`). Completion uses the same ticket-plus-nonce handoff as
-connects (§13.2).
+connects (§13.3).
 
 **This repo hard-codes Access mode** — no `AUTH_GATEKEEPERS` support exists in `scripts/` or
 `deployment.jsonc`. `docs/customization.md:83-84` states both alternatives require deploy script
@@ -1088,7 +1091,7 @@ via a plain `workspace:*` dependency with no submodule changes.
 
 The cost: every `catalog:` specifier those packages declare resolves against *our*
 `pnpm-workspace.yaml`, which must mirror the submodule's entries byte-for-byte. A missing entry fails
-`pnpm install` loudly (§13.1: `typescript6`, `zod`); a stale one is silent — two copies of `capnweb`,
+`pnpm install` loudly (§13.2: `typescript6`, `zod`); a stale one is silent — two copies of `capnweb`,
 and a stub minted by one is unserialisable by the other.
 
 ---
@@ -1164,7 +1167,7 @@ Start from `gatekeeper-kit` rather than a copy of Slack: `OAuthClient` + `oauthR
 endpoint (manual redirects, capped bodies, timeouts, RFC 7009 revoke, PKCE), `CredentialCoordinator`
 for serialized refresh, `ActionDescriptionBuilder` for approval text, and `delivery` per action
 (§8.3). Implement the connect handoff (`complete()` → `ConnectHandoff`, `reconnectComplete()`,
-`commitReconnect()`; §13.2) and set `BASE_URL` (§1.2).
+`commitReconnect()`; §13.3) and set `BASE_URL` (§1.2).
 
 **Telegram is a design problem first.** The Bot API uses a bot token, not OAuth, so `connectAccount`
 resembles MCP's connect form. More seriously it is **update-driven**: there is no "fetch this
@@ -1621,18 +1624,20 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 ### Decided, not yet done
 
-- **Authenticated verification of the `ef65348f` deploy.** The CLI-checkable items passed (§13.1);
-  the browser ones have not run for this deploy *or* the 2026-09-13 one — `/admin` positive and
-  negative, a denied identity, the model picker (including the new models), schedules still listed
-  and a new one firing, the Context catalog in a new chat, and an end-to-end connect through the
-  handoff flow. Do these before relying on any connector.
+- **Authenticated verification of the `b304e8c2` deploy.** The CLI-checkable items passed (§13.1);
+  the browser ones have not run for this deploy or the two before it — `/admin` positive and
+  negative, a denied identity, the model picker and the new `/admin` Models tab, schedules still
+  listed and a new one firing, the Context catalog in a new chat, and an end-to-end connect through
+  the handoff flow. Do these before relying on any connector.
 - **Turn user search on explicitly.** Decided 2026-09-29: user search **on**. Set the toggle in
   `/admin` rather than relying on the `!signupsEnabled` default (§6), so the choice is stored and
   survives a later signups change.
 - **Three blueprints** — message board, todo list, kanban; Basecamp-5 styled, built in-platform from
   `format.document`, promoted via `/admin` → Formats (path A). Read
   `bundled-blueprints/blueprints/workspace-docs/files/server.ts` and `libraries/sync` first to
-  decide whether to inherit its `document:v2` revision model.
+  decide whether to inherit its `document:v2` revision model. Since `b304e8c2` a published
+  blueprint is a git release, and gadgets made from it are offered each later release (§13.1) — so
+  republishing ours updates every board already in use, with an agent merging local edits.
 - **Context collection** — a git-backed house knowledge base, `public` visibility so it is
   admin-write / everyone-read, with `skills/<name>/SKILL.md` folders.
 
@@ -1653,22 +1658,27 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 ### Watch
 
 - **This repo is not the only thing that deploys to this account.** A full `pnpm deploy` landed on
-  2026-09-10 that no commit or note here records (§13.2). Before any deploy, read the live version
+  2026-09-10 that no commit or note here records (§13.3). Before any deploy, read the live version
   IDs from the account rather than trusting this doc.
-- **`pnpm check` does not compile disabled packages** — run `pnpm lint` on every bump (§1.3, §13.1).
+- **`pnpm check` does not compile disabled packages** — run `pnpm lint` on every bump (§1.3, §13.2).
 - **Upgrades reshape our workspace, not just versions** — keep catalog entries byte-identical, and
   expect new members and new `catalog:` specifiers from the three submodule packages we host
-  (§8.6, §13.1, §13.3).
+  (§8.6, §13.2, §13.4).
 - **`README.md` says "The deployment is six Workers"** — stale; the count is configurable (five
   active here)
+- **`deploy.ts` reads a generated file.** Since `b304e8c2` each Worker's config is authored in
+  `cloudflare.config.ts`; the `wrangler.jsonc` our wrapper reads is generated from it and committed
+  (§13.1). If upstream stops committing it, `deploy.ts` breaks — check for it on every bump.
+- **Usage metrics are off here.** `METRICS` (Analytics Engine) is optional and the wrapper binds
+  nothing, so `recordAnalytics` writes nowhere. Enabling it is a wrapper change (§13.1).
 - **Toolchain drift** — our top-level Wrangler resolved to 4.143.0 while the submodule pins 4.138.0.
   Dry-runs and deploys run the submodule's; ours is used only for `whoami`/`secret`/`deployments`.
 - **Any future OAuth Gatekeeper** needs `BASE_URL` (nothing enforces it), relies on the backend's
   `PUBLIC_BASE_URL`, and must implement the connect handoff (`complete()` → `ConnectHandoff`,
   `reconnectComplete()`, `commitReconnect()`).
 - **Typed-storage property names are storage keys** — renaming a persisted field is a migration
-  unless it declares `storageKey` / `storageName` (§13.2)
-- **Restricted data has a stated `use`-collaborator hole** (§13.2) — relevant before connecting any
+  unless it declares `storageKey` / `storageName` (§13.3)
+- **Restricted data has a stated `use`-collaborator hole** (§13.3) — relevant before connecting any
   gatekeeper holding client-confidential data to a workspace with `use` collaborators
 - **User search exposes emails** to every authenticated user when on, and the directory fills only
   as people sign in (§6)
@@ -1679,10 +1689,10 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
   hook-driven Gatekeeper of our own.
 - **`providesUi` routing keys on vendor id, not account id** (`server.ts:621`) — one UI-declaring
   account per vendor per user, or the extras become unreachable
-- **The next storage migration will not be free.** §13.3's rollback-is-gone tradeoff was acceptable
+- **The next storage migration will not be free.** §13.4's rollback-is-gone tradeoff was acceptable
   only because no gadget history existed. Once real gadgets do, a migrating bump needs a parallel
   Workshop identity with its own storage, exercised against a copy, before it touches production.
-  (`ef65348f`'s `v3` is additive only.)
+  (`ef65348f`'s `v3` and `b304e8c2`'s Overseer v5 are additive only.)
 - **`gitObjects` has no GC** (§14.1). Gatekeeper-supplied objects are capped at 1 MiB; locally
   written ones only softly. Worth a look at actual object counts once gadgets accumulate history.
 
@@ -1692,7 +1702,104 @@ sketched above — and the natural first test of whether a failed `recordUsage` 
 
 Newest first.
 
-### 13.1 `08afe059` → `ef65348f` (2026-09-29) — deployed
+### 13.1 `ef65348f` → `b304e8c2` (2026-10-06) — deployed
+
+49 commits, 2026-09-29 → 2026-10-05. A clean fast-forward; the starter wrapper remains 0 behind
+`cloudflare/cloudflare-os-starter`. Bumped on branch `bump/cloudflare-os-b304e8c2` (commit
+`dd06ecd`), fast-forwarded into `main`. `pnpm lint`, `pnpm check` (30/30 wrapper tests, all five
+active Workers dry-run clean, generated configs removed) and `pnpm test` pass. Upstream's own suites
+were not run. `pnpm peers check` reports unmet peers inside vite-plus 1.0's bundled vitest and
+Wrangler; not investigated, and nothing failed.
+
+**Deploy record.** Deployed 2026-10-06 12:17–12:23 UTC, account `cae2b6350c3a5a8bc9451652ffb0c9d7`,
+route `os.veer.studio`, from root commit `dd06ecd` / submodule `b304e8c2`, after re-reading the live
+versions (unchanged since 2026-09-29). All five active Workers deployed in the script's order, exit 0.
+
+| Worker | Previous version (rollback target) | New version |
+|---|---|---|
+| `veeros-gk-context` | `25fbbd55-bcf1-412d-a666-644800eb52ee` | `8a597940-4016-4872-9d0e-09242537a86e` |
+| `veeros-gk-scheduler` | `90e3a47d-1563-4538-a0c2-145f02c61e4b` | `7efc47af-e27a-44c4-8604-cd810d9bac02` |
+| `veeros-gk-mcp` | `d717fc33-6b94-4cfb-a2d5-815d62b69f57` | `d25238aa-8803-4106-82b8-a3ea6beaaf10` |
+| `veeros-backend` | `022aebcc-4a8c-45db-a5e9-b7d26f07edd5` | `10cea740-8393-43ba-bdb3-4ee02049f07c` |
+| `veeros` (router) | `94c4fd56-e271-4338-b19d-e2cd5bae16ac` | `396ae1c7-0d45-4c89-b084-4f793b6d0409` |
+
+**Verified after deploy:** valid TLS on `os.veer.studio`; unauthenticated requests to `/`, `/api/`,
+`/admin`, `/gatekeeper/mcp`, `/gatekeeper/context`, `/gatekeeper/scheduler` and `/connect/handoff`
+all 302 to `veerstudio.cloudflareaccess.com` carrying the configured audience; every backend
+reported *"No targets deployed"* — the Router holds the only route; the new backend version carries
+compatibility date `2026-09-04`, the same flags, and the same storage, gatekeeper, AI and Access
+bindings as before. **Not verified:** everything needing an authenticated browser session (§12).
+
+#### What the wrapper had to change
+
+1. **Catalog re-sync.** `workers-types` `^5.20260924.1`, `vite-plus` `^1.0.0`, `zod` `^4.6.5`; the
+   `vite` override is now selected as `vite@*`, because vite-plus 1.0 depends on `vite` as an alias
+   for its own core and a bare `vite` override would substitute vite 7 under `vp` (#632). `capnweb`
+   stays a single copy (0.12.0). Our root takes `vite-plus` from the catalog, so this moved our own
+   `vp` to 1.0 too.
+2. **Task `input`/`output` moved under `cache`** in `custom-gatekeeper` and `error-reporter`'s
+   `vite.config.ts` — the vite-plus 1.0 task schema (vite-task#749), ported as upstream did. Whether
+   the old shape would have failed was not tested.
+
+#### What did not change
+
+`scripts/deploy.ts`, the two submodule scripts it imports, and the five base configs it reads: each
+`wrangler.jsonc` parses identical to `ef65348f` (keys sorted, `$schema` dropped). That holds despite
+#597, which moved authoring to a `cloudflare.config.ts` per Worker built from
+`scripts/worker-config.ts`: the `wrangler.jsonc` beside it is now generated by
+`scripts/generate-worker-configs.ts` but still committed, and `pnpm configs:check` fails upstream
+on a stale one. No new vars, secrets, bindings or Wrangler migrations. The Gatekeeper contract
+changed only in `GitCache.consumePack`'s documentation (#656), so `custom-gatekeeper` still compiles.
+`@gadgets/backend-utils` was renamed `@gadgets/observability` (#568); nothing in the wrapper named
+it.
+
+#### The Overseer storage migration, and what it does to rollback
+
+**Overseer storage v4 → v5, `migrateToBlueprintUpstreams`** (#659; migrations now live in
+`workshop-backend/src/storage-schema/overseer-migrations.ts`, #639). Additive: it backfills an
+optional `upstream` on gadget records — the blueprint an agent's `createGadget` call named, or `{}`
+for a from-scratch gadget — from at most 1,000 chat messages per workspace. Synchronous, in one
+`transactionSync`, chained after `migrateToWorkpieceTypes` in the constructor; it skips the scan
+entirely when no gadget lacks an `upstream`.
+
+**Rollback is weaker than the migration suggests.** #659 also changed what a blueprint *is*: a git
+release pack in `BLUEPRINT_CONTENT` under `<blueprintId>/<commitId>`, not a gzipped Yjs snapshot
+under `<blueprintId>/<version>`, and the `.gadget` archive gained version 2 for it. New code still
+reads snapshots, as their snapshot release. Old code reads neither releases nor archive v2 — so
+**once a blueprint is published or updated on `b304e8c2`, rolling back to `ef65348f` breaks it**.
+Merges are now recorded as git commits rather than OTs as well. Until we publish a blueprint, the
+`ef65348f` versions above remain plausible targets; as in §13.2, rollback across a Durable Object
+migration is unproven.
+
+#### Behaviour changes that matter to us
+
+- **MCP Gatekeeper security fix** (#668) — it parsed its connect form with `formData()` before
+  checking the nonce, so anyone holding a connect URL could make the Worker buffer a body of any
+  size into a 128 MB isolate; now capped at 16 KiB. Credential-expiry notifications in five
+  gatekeepers also latch only after delivery, so one failed callback no longer silences the
+  reconnect prompt for good. We run MCP — the main reason for this deploy.
+- **Blueprints are git releases with updates** (#659) — publishing a new release offers it to every
+  gadget made from the blueprint (a dot on the blueprints button, not automatic); local edits are
+  merged by a spawned agent; a gadget can switch to another blueprint while updating. Shapes the
+  three-blueprints plan (§12).
+- **`/admin` Models tab** (#616, #657) — enable and test providers, add models (with image input and
+  reasoning levels), set default reasoning, without patching `SUGGESTED_MODELS`. Stored in the
+  `AdminSettings` DO; `CF_AI_GATEWAY_PROVIDERS` is now a floor that admin-added providers extend.
+  Suggested models now include Claude Sonnet 5.5 and GPT-6.1 Sol (#610); superseded models are
+  hidden from pickers but still resolve (#611).
+- **Agent turns** — resume after auto-approval (#599); a workspace whose loop counter is exhausted
+  restarts (#640); the system prompt is sent as a static and a dynamic block for prompt caching
+  (#609); agent turns are traced for the Agents dashboard (#595).
+- **Usage metrics via Analytics Engine** (#568) — an `activity/v1` writer to a `gadgets_metrics_v1`
+  dataset, a no-op without an optional `METRICS` binding the wrapper does not add (§12).
+- **Git** — packs stream through `consumePack` instead of being buffered (#656).
+- **Not deployed here**: Google Chat for the Google gatekeeper (#560, #606, #649), Gmail fully
+  simulating its actions (#638), GitHub refreshing expiring tokens instead of breaking after eight
+  hours (#661).
+- **Also**: workspace-deletion WebSocket fix (#598), dialog viewport fix (#619), read-only code view
+  explained (#633), dependency bumps, and three more rounds of public-API kernel integration tests.
+
+### 13.2 `08afe059` → `ef65348f` (2026-09-29) — deployed
 
 55 commits, 2026-09-14 → 2026-09-28. A clean fast-forward; the starter wrapper remains 0 behind
 `cloudflare/cloudflare-os-starter`. Bumped on branch `bump/cloudflare-os-ef65348f` (commit
@@ -1725,7 +1832,7 @@ generated module). Nothing referenced it; it was deleted.
 
 #### What the wrapper had to change
 
-1. **Catalog re-sync.** `@gadgets/scripts` — a member of our workspace since §13.3 — now declares
+1. **Catalog re-sync.** `@gadgets/scripts` — a member of our workspace since §13.4 — now declares
    `typescript6: catalog:` and `zod: catalog:`, so both must resolve here or `pnpm install` fails.
    Added `typescript6` (`npm:typescript@6.0.3`), `zod` (`^4.5.4`) and `miniflare`
    (`5.20260921.1-alpha`); bumped `vitest` to `^4.1.11` and `wrangler` to `^4.138.0`; pointed the
@@ -1733,7 +1840,7 @@ generated module). Nothing referenced it; it was deleted.
    copy (0.12.0).
 2. **`custom-gatekeeper` gained `commitReconnect()`.** A throwing stub, like upstream's Scheduler.
    **This was already broken at `08afe059`**: #464/#473 made `GatekeeperUser.commitReconnect`
-   required, so `pnpm lint` failed on `main` from the moment of that bump. §13.2's claim that our
+   required, so `pnpm lint` failed on `main` from the moment of that bump. §13.3's claim that our
    package was "unaffected" was wrong — it checked for a connect callback, not for the new required
    method. `pnpm check` never noticed because it skips the disabled package (§1.3).
 
@@ -1777,10 +1884,10 @@ Durable Object migration must be checked against the rollback docs before relyin
   agent-facing `types.d.ts` self-containment lint (#581, #582), and three rounds of public-API kernel
   integration tests.
 
-### 13.2 `54d5d8b0` → `08afe059` (2026-09-13) — deployed
+### 13.3 `54d5d8b0` → `08afe059` (2026-09-13) — deployed
 
 Six commits, 2026-09-09 → 2026-09-11. `pnpm check` needed no wrapper changes — but `pnpm lint`
-would have failed (§13.1).
+would have failed (§13.2).
 
 **Deploy record.** Deployed 2026-09-13 19:31–19:32 UTC, account `cae2b6350c3a5a8bc9451652ffb0c9d7`,
 route `os.veer.studio`, from root commit `303dc0a` / submodule `08afe059`. All five active Workers
@@ -1801,7 +1908,7 @@ deployed in the script's order, exit 0. These versions are still live (§2).
 needing an authenticated browser session (§12).
 
 **`54d5d8b0` had already been deployed** on 2026-09-10 ~10:25 UTC, outside this repo's recorded
-history — so the one-way git-storage migration (§13.3) ran then. Hence the §12 rule: read the
+history — so the one-way git-storage migration (§13.4) ran then. Hence the §12 rule: read the
 account, not this doc.
 
 **Connect flows are bound to the initiating browser** (#464, #473). A connect URL used to be a bearer
@@ -1834,7 +1941,7 @@ gained `singleton(default, {storageKey})` and `collection(..., {storageName})`, 
 `storageKey: "prohibitAllSharing"` — without it, *"every workspace that has already observed
 restricted data would silently unlatch."*
 
-### 13.3 `6478a144` → `54d5d8b0` (2026-09-09) — deployed 2026-09-10
+### 13.4 `6478a144` → `54d5d8b0` (2026-09-09) — deployed 2026-09-10
 
 82 commits, 2026-08-18 → 2026-09-08. A clean fast-forward.
 
@@ -1852,7 +1959,7 @@ Three edits, all forced by upstream repackaging:
    task is upstream's workspace-wide CI guard and shells out to a bin not linked into its own `.bin`.
 
 All three follow from the submodule reshaping its own workspace; expect the same classes on future
-bumps (§13.1 was class 1 again).
+bumps (§13.2 was class 1 again).
 
 #### The one-way migration
 

@@ -41,8 +41,8 @@
     // requests and repositories. Bound as GATEKEEPER_GITHUB and served at /gatekeeper/github.
     "github": { "name": "veeros-gk-github" },
 
-    // All three disabled below, so none of these names is read. Kept for the next iteration.
-    // "email": { "name": "veeros-gk-email" },
+    // Disabled below unless enabled; named here so the generated configs can bind them.
+    "email": { "name": "veeros-gk-email" },
     // "customGatekeeper": { "name": "veeros-gk-custom" },
     // "errorReporter": { "name": "veeros-errors" }
   },
@@ -109,9 +109,9 @@
   // first deploy -- pnpm deploy prints the exact commands. Never put them in this file.
   "github": { "enabled": true },
 
-  // The upstream Email Gatekeeper. Wired but disabled pending the Email Routing decision (which
-  // addresses, on which zone): nothing is built, deployed, or bound while this is false.
-  "email": { "enabled": false },
+  // The upstream Email Gatekeeper. Receives inbound mail routed by Cloudflare Email Routing
+  // on the zone that owns the router's custom domain. Nothing is built or bound while false.
+  "email": { "enabled": true },
 
   // The example custom integration. Disabled: packages/custom-gatekeeper is kept for reference and
   // the next iteration, but nothing is built, deployed, or bound while this is false.

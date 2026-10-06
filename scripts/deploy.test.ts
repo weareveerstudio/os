@@ -19,6 +19,8 @@ const validConfig: DeploymentConfig = {
     context: { name: "acme-cloudflare-os-context" },
     scheduler: { name: "acme-cloudflare-os-scheduler" },
     mcp: { name: "acme-cloudflare-os-mcp" },
+    github: { name: "acme-cloudflare-os-github" },
+    email: { name: "acme-cloudflare-os-email" },
     customGatekeeper: { name: "acme-cloudflare-os-custom" },
     errorReporter: { name: "acme-cloudflare-os-errors" },
   },
@@ -39,6 +41,10 @@ const validConfig: DeploymentConfig = {
     artifacts: { enabled: true, namespace: "acme-context-collections" },
   },
   mcp: { enabled: true },
+  // Off here so every assertion written before they existed still describes the whole output;
+  // the tests below that need them turn them on.
+  github: { enabled: false },
+  email: { enabled: false },
   customGatekeeper: { enabled: true, name: "Acme", message: "Use the company handbook." },
   errorReporting: { enabled: true, environment: "production", release: "abc123" },
   resources: {
@@ -76,6 +82,8 @@ async function baseConfigs(): Promise<BaseConfigs> {
     context: await baseConfig("../cloudflare-os/packages/gatekeeper-context/wrangler.jsonc"),
     scheduler: await baseConfig("../cloudflare-os/packages/gatekeeper-scheduler/wrangler.jsonc"),
     mcp: await baseConfig("../cloudflare-os/packages/gatekeeper-mcp/wrangler.jsonc"),
+    github: await baseConfig("../cloudflare-os/packages/gatekeeper-github/wrangler.jsonc"),
+    email: await baseConfig("../cloudflare-os/packages/gatekeeper-email/wrangler.jsonc"),
     customGatekeeper: await baseConfig("../packages/custom-gatekeeper/wrangler.jsonc"),
     errorReporter: await baseConfig("../packages/error-reporter/wrangler.jsonc"),
   };
@@ -527,6 +535,164 @@ test("omits a disabled custom Gatekeeper from both binding lists", async () => {
   assert.equal(generated.customGatekeeper, undefined);
   assert.equal(generated.workshop.services!.some((s) => s.binding === "GATEKEEPER_CUSTOM"), false);
   assert.equal(generated.router.services!.some((s) => s.binding === "GATEKEEPER_CUSTOM"), false);
+});
+
+/** {@link validConfig} with the GitHub Gatekeeper, and optionally the Email one, turned on. */
+function withVendors({ email = false } = {}): DeploymentConfig {
+  return variant((c) => {
+    c.github = { enabled: true };
+    if (email) c.email = { enabled: true };
+  });
+}
+
+/** The MCP Gatekeeper's build steps for `config`. */
+function mcpBuilds(config: DeploymentConfig) {
+  return buildCommands(config).filter(({ args }) => args.includes("@gadgets/mcp-gatekeeper"));
+}
+
+test("binds an enabled GitHub Gatekeeper on the router and the Workshop", async () => {
+  const bases = await baseConfigs();
+  const generated = generateConfigs(withVendors(), bases);
+
+  // Bare on the router, which forwards whole HTTP requests -- including the OAuth callback under
+  // /gatekeeper/github/oauth -- and picks the path from the binding name.
+  assert.deepEqual(
+    generated.router.services!.find((service) => service.binding === "GATEKEEPER_GITHUB"),
+    { binding: "GATEKEEPER_GITHUB", service: "acme-cloudflare-os-github" });
+  // Vendor RPC on the Workshop, with no props: its accounts live in its own Durable Objects.
+  assert.deepEqual(
+    generated.workshop.services!.find((service) => service.binding === "GATEKEEPER_GITHUB"),
+    {
+      binding: "GATEKEEPER_GITHUB",
+      service: "acme-cloudflare-os-github",
+      entrypoint: "GatekeeperVendor",
+    });
+
+  assert.equal(generated.github!.name, "acme-cloudflare-os-github");
+  // Load-bearing for the same reason as MCP's: unset, getBaseUrl() falls back to localhost and the
+  // OAuth App's callback never reaches the deployment.
+  assert.deepEqual(generated.github!.vars, { BASE_URL: "https://os.example.com/gatekeeper/github" });
+  // CLIENT_ID and CLIENT_SECRET are installed after the first deploy, so wrangler must not be told
+  // to require them -- it would refuse to create the Worker they are installed on.
+  assert.equal(generated.github!.secrets, undefined);
+  assert.deepEqual(generated.github!.migrations, bases.github.migrations);
+  assert.equal(generated.github!.workers_dev, false);
+  assert.equal(generated.github!.routes, undefined);
+  assert.equal(generated.github!.preview_urls, false);
+
+  const builds = buildCommands(withVendors())
+    .map(({ args }) => args)
+    .filter((args) => args.includes("@gadgets/github-gatekeeper"));
+  assert.deepEqual(builds.map((args) => args.at(-1)), ["build"]);
+});
+
+test("derives the GitHub BASE_URL from a workers.dev origin too", async () => {
+  const config = variant((c) => {
+    c.github = { enabled: true };
+    c.workers.router.route = { workersDev: true };
+    c.publicBaseUrl = "https://acme-cloudflare-os.acme.workers.dev";
+  });
+  const generated = generateConfigs(config, await baseConfigs());
+  assert.equal(
+    generated.github!.vars!.BASE_URL, "https://acme-cloudflare-os.acme.workers.dev/gatekeeper/github");
+});
+
+test("omits a disabled GitHub Gatekeeper from both binding lists and the build", async () => {
+  const config = variant((c) => {
+    c.github = { enabled: false };
+    c.workers.github = { name: "<GITHUB_WORKER_NAME>" };
+  });
+
+  const generated = generateConfigs(config, await baseConfigs());
+
+  assert.equal(generated.github, undefined);
+  assert.equal(generated.workshop.services!.some((s) => s.binding === "GATEKEEPER_GITHUB"), false);
+  assert.equal(generated.router.services!.some((s) => s.binding === "GATEKEEPER_GITHUB"), false);
+  assert.ok(!buildCommands(config).some(({ args }) => args.includes("@gadgets/github-gatekeeper")));
+});
+
+test("leaves the Email Gatekeeper out while it is disabled", async () => {
+  // The fixture's default, and this deployment's: wired, but nothing built, deployed or bound.
+  const generated = generateConfigs(validConfig, await baseConfigs());
+
+  assert.equal(generated.email, undefined);
+  assert.equal(generated.workshop.services!.some((s) => s.binding === "GATEKEEPER_EMAIL"), false);
+  assert.equal(generated.router.services!.some((s) => s.binding === "GATEKEEPER_EMAIL"), false);
+  assert.ok(!buildCommands(validConfig).some(({ args }) => args.includes("@gadgets/email-gatekeeper")));
+
+  // A commented-out Worker name is fine while disabled.
+  const unnamed = variant((c) => { delete c.workers.email; });
+  assert.equal(generateConfigs(unnamed, await baseConfigs()).email, undefined);
+});
+
+test("binds an enabled Email Gatekeeper the same way, with its own BASE_URL", async () => {
+  const config = withVendors({ email: true });
+  const generated = generateConfigs(config, await baseConfigs());
+
+  // For Email this is the mailbox resource namespace as well as the fetch-handler prefix.
+  assert.deepEqual(generated.email!.vars, { BASE_URL: "https://os.example.com/gatekeeper/email" });
+  assert.equal(generated.email!.secrets, undefined);
+  assert.equal(generated.email!.preview_urls, false);
+  assert.ok(buildCommands(config).some(({ args }) => args.includes("@gadgets/email-gatekeeper")));
+
+  // Appended after MCP, ahead of the custom Gatekeeper, in both lists.
+  assert.deepEqual(generated.router.services!.map(({ binding }) => binding), [
+    "WORKSHOP_BACKEND", "GATEKEEPER_CONTEXT", "GATEKEEPER_SCHEDULER",
+    "GATEKEEPER_MCP", "GATEKEEPER_GITHUB", "GATEKEEPER_EMAIL", "GATEKEEPER_CUSTOM",
+  ]);
+  assert.deepEqual(generated.workshop.services!.map(({ binding }) => binding), [
+    "ERROR_REPORTER", "GATEKEEPER_CONTEXT", "GATEKEEPER_SCHEDULER",
+    "GATEKEEPER_MCP", "GATEKEEPER_GITHUB", "GATEKEEPER_EMAIL", "GATEKEEPER_CUSTOM",
+  ]);
+  assert.ok(generated.workshop.services!
+    .filter(({ binding }) => binding !== "GATEKEEPER_CONTEXT" && binding !== "ERROR_REPORTER")
+    .every((service) => service.props === undefined));
+});
+
+test("keeps the MCP Gatekeeper's output unchanged by the other vendor Gatekeepers", async () => {
+  const bases = await baseConfigs();
+  const without = generateConfigs(validConfig, bases);
+  const withBoth = generateConfigs(withVendors({ email: true }), bases);
+
+  assert.equal(JSON.stringify(withBoth.mcp), JSON.stringify(without.mcp));
+  assert.deepEqual(without.mcp!.vars, {
+    MCP_ALLOW_INSECURE: "false",
+    BASE_URL: "https://os.example.com/gatekeeper/mcp",
+  });
+  for (const list of ["router", "workshop"] as const) {
+    const mcp = (generated: GeneratedConfigs) => generated[list].services!
+      .find((service) => service.binding === "GATEKEEPER_MCP");
+    assert.deepEqual(mcp(withBoth), mcp(without), list);
+  }
+  assert.deepEqual(mcpBuilds(withVendors({ email: true })), mcpBuilds(validConfig));
+});
+
+test("validates the GitHub and Email blocks like MCP's", () => {
+  assert.throws(
+    () => validateConfig(variant((c) => { delete c.github; })),
+    /Missing required deployment value: github\.enabled/);
+  assert.throws(
+    () => validateConfig(variant((c) => { delete c.email; })),
+    /Missing required deployment value: email\.enabled/);
+  assert.throws(
+    () => validateConfig(variant((c) => { c.github = { enabled: "true" }; })),
+    /github\.enabled must be a boolean/);
+  assert.throws(
+    () => validateConfig(variant((c) => { c.github = { enabled: true }; delete c.workers.github; })),
+    /workers\.github\.name/);
+  assert.throws(
+    () => validateConfig(variant((c) => { c.email = { enabled: true }; delete c.workers.email; })),
+    /workers\.email\.name/);
+  // An enabled one takes part in the uniqueness check; a disabled one does not.
+  assert.throws(
+    () => validateConfig(variant((c) => {
+      c.github = { enabled: true };
+      c.workers.github.name = c.workers.mcp.name;
+    })),
+    /unique/i);
+  assert.doesNotThrow(() => validateConfig(variant((c) => {
+    c.workers.email.name = c.workers.mcp.name;
+  })));
 });
 
 // An enabled Gatekeeper still has to be named: silently deploying one under an undefined name is

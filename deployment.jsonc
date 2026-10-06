@@ -37,7 +37,12 @@
     // binding would leave the Worker running with its accounts intact but invisible to the app.
     "mcp": { "name": "veeros-gk-mcp" },
 
-    // Both disabled below, so neither name is read. Kept for the next iteration.
+    // The GitHub Gatekeeper, which lets users connect a GitHub account to work with issues, pull
+    // requests and repositories. Bound as GATEKEEPER_GITHUB and served at /gatekeeper/github.
+    "github": { "name": "veeros-gk-github" },
+
+    // All three disabled below, so none of these names is read. Kept for the next iteration.
+    // "email": { "name": "veeros-gk-email" },
     // "customGatekeeper": { "name": "veeros-gk-custom" },
     // "errorReporter": { "name": "veeros-errors" }
   },
@@ -97,6 +102,16 @@
 
   // The upstream MCP Gatekeeper. Its Worker name in workers.mcp is the whole configuration.
   "mcp": { "enabled": true },
+
+  // The upstream GitHub Gatekeeper, an OAuth gatekeeper. Needs a GitHub OAuth App (not a GitHub
+  // App) whose authorization callback URL is <public origin>/gatekeeper/github/oauth. Its
+  // CLIENT_ID and CLIENT_SECRET are Worker secrets, entered with `wrangler secret put` after the
+  // first deploy -- pnpm deploy prints the exact commands. Never put them in this file.
+  "github": { "enabled": true },
+
+  // The upstream Email Gatekeeper. Wired but disabled pending the Email Routing decision (which
+  // addresses, on which zone): nothing is built, deployed, or bound while this is false.
+  "email": { "enabled": false },
 
   // The example custom integration. Disabled: packages/custom-gatekeeper is kept for reference and
   // the next iteration, but nothing is built, deployed, or bound while this is false.

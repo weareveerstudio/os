@@ -113,6 +113,10 @@ export interface DeploymentConfig {
     scheduler: { name: string };
     /** Only required when `mcp.enabled`. */
     mcp?: { name: string };
+    /** Only required when `github.enabled`. */
+    github?: { name: string };
+    /** Only required when `email.enabled`. */
+    email?: { name: string };
     /** Only required when `customGatekeeper.enabled`. */
     customGatekeeper?: { name: string };
     /** Only required when `errorReporting.enabled`. */
@@ -127,6 +131,17 @@ export interface DeploymentConfig {
    * portal variant (`gatekeeper-mcp-portal`) is the one that needs a URL, and this is not it.
    */
   mcp: { enabled: boolean };
+  /**
+   * The upstream GitHub Gatekeeper, an OAuth gatekeeper. Configured by its Worker name alone here:
+   * its `CLIENT_ID` and `CLIENT_SECRET` are secrets, installed on the Worker with `wrangler secret
+   * put` rather than written into any file.
+   */
+  github: { enabled: boolean };
+  /**
+   * The upstream Email Gatekeeper, which receives mail through Email Routing. No secrets; the
+   * routing rules live on the zone, outside anything this script deploys.
+   */
+  email: { enabled: boolean };
   /** Display text the example custom Gatekeeper serves to agents. */
   customGatekeeper: { enabled: boolean; name?: string; message?: string };
   /** Private explicit-issue destination. */
@@ -192,6 +207,10 @@ export interface GeneratedConfigs {
   scheduler: ProdWranglerConfig;
   /** Absent when `mcp.enabled` is false. */
   mcp?: ProdWranglerConfig;
+  /** Absent when `github.enabled` is false. */
+  github?: ProdWranglerConfig;
+  /** Absent when `email.enabled` is false. */
+  email?: ProdWranglerConfig;
   /** Absent when `customGatekeeper.enabled` is false. */
   customGatekeeper?: ProdWranglerConfig;
   /** Absent when `errorReporting.enabled` is false. */
@@ -205,6 +224,8 @@ export interface BaseConfigs {
   context: ProdWranglerConfig;
   scheduler: ProdWranglerConfig;
   mcp: ProdWranglerConfig;
+  github: ProdWranglerConfig;
+  email: ProdWranglerConfig;
   customGatekeeper: ProdWranglerConfig;
   errorReporter: ProdWranglerConfig;
 }

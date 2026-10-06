@@ -25,12 +25,46 @@ const packageDirs = {
   context: "cloudflare-os/packages/gatekeeper-context",
   scheduler: "cloudflare-os/packages/gatekeeper-scheduler",
   mcp: "cloudflare-os/packages/gatekeeper-mcp",
+  github: "cloudflare-os/packages/gatekeeper-github",
+  email: "cloudflare-os/packages/gatekeeper-email",
   customGatekeeper: "packages/custom-gatekeeper",
   errorReporter: "packages/error-reporter",
 } as const;
 const generatedPaths = Object.fromEntries(
   Object.entries(packageDirs).map(([name, dir]) => [name, join(root, dir, generatedName)]),
 ) as Record<keyof typeof packageDirs, string>;
+
+/**
+ * The upstream Gatekeepers deployed from the submodule whose whole deploy-time configuration is an
+ * `enabled` flag, a Worker name, and the `BASE_URL` derived from the public origin. Each is bound
+ * as `binding` on the router (bare) and on the Workshop (`GatekeeperVendor`, no props), built with
+ * one `vp run --no-cache build` of `pkg`, and deployed in this order -- after the Scheduler, before
+ * the custom Gatekeeper.
+ *
+ * MCP comes first and the other two are appended, so MCP's generated config and its position in
+ * both binding lists are what they were before the table existed.
+ */
+const vendorGatekeepers = [
+  { key: "mcp", binding: "GATEKEEPER_MCP", pkg: "@gadgets/mcp-gatekeeper" },
+  { key: "github", binding: "GATEKEEPER_GITHUB", pkg: "@gadgets/github-gatekeeper" },
+  { key: "email", binding: "GATEKEEPER_EMAIL", pkg: "@gadgets/email-gatekeeper" },
+] as const;
+
+type VendorGatekeeper = (typeof vendorGatekeepers)[number];
+
+function enabledVendorGatekeepers(config: DeploymentConfig): VendorGatekeeper[] {
+  return vendorGatekeepers.filter(({ key }) => config[key].enabled);
+}
+
+/**
+ * The router's path for a Gatekeeper binding: `/gatekeeper/<short>`, where `<short>` is the binding
+ * name minus its prefix, lowercased -- GATEKEEPER_MCP -> mcp. Derived rather than tabulated, so it
+ * cannot disagree with the router, which applies the same rule to whatever it finds bound.
+ */
+function gatekeeperPath(binding: string): string {
+  return `/gatekeeper/${binding.slice("GATEKEEPER_".length).toLowerCase()}`;
+}
+
 const defaultContextArtifactsNamespace = "gatekeeper-context-collections";
 const accountIdPattern = /^[a-f\d]{32}$/i;
 
@@ -45,7 +79,7 @@ const requiredPaths = [
   "access.admins",
   "aiGateway.enabled",
   "errorReporting.enabled",
-  "mcp.enabled",
+  ...vendorGatekeepers.map(({ key }) => `${key}.enabled`),
   "customGatekeeper.enabled",
   "observability.enabled",
   "observability.headSamplingRate",
@@ -64,12 +98,6 @@ const aiGatewayPaths = [
 const errorReportingPaths = [
   "workers.errorReporter.name",
   "errorReporting.environment",
-];
-
-// The MCP Gatekeeper's Worker name is the whole of its configuration: everything else it needs is
-// in the submodule's own base config.
-const mcpPaths = [
-  "workers.mcp.name",
 ];
 
 const customGatekeeperPaths = [
@@ -176,7 +204,10 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
     ...requiredPaths,
     ...(config.aiGateway?.enabled ? aiGatewayPaths : []),
     ...(config.errorReporting?.enabled ? errorReportingPaths : []),
-    ...(config.mcp?.enabled ? mcpPaths : []),
+    // A vendor Gatekeeper's Worker name is the whole of its configuration: everything else it
+    // needs is in the submodule's own base config, or a secret installed on the Worker.
+    ...vendorGatekeepers.flatMap(({ key }) =>
+      config[key]?.enabled ? [`workers.${key}.name`] : []),
     ...(config.customGatekeeper?.enabled ? customGatekeeperPaths : []),
   ];
   for (const path of activePaths) {
@@ -203,15 +234,17 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
       errorReporting: { enabled: false },
     };
   }
-  // Same treatment for the two optional Gatekeepers: a placeholder left in a block this deployment
-  // never reads is not an error, and scanning it anyway would make disabling one impossible without
-  // also inventing values for it.
-  if (!config.mcp.enabled) {
-    activeConfig = {
-      ...activeConfig,
-      workers: { ...activeConfig.workers, mcp: undefined },
-      mcp: { enabled: false },
-    };
+  // Same treatment for the optional Gatekeepers: a placeholder left in a block this deployment never
+  // reads is not an error, and scanning it anyway would make disabling one impossible without also
+  // inventing values for it.
+  for (const { key } of vendorGatekeepers) {
+    if (!config[key].enabled) {
+      activeConfig = {
+        ...activeConfig,
+        workers: { ...activeConfig.workers, [key]: undefined },
+        [key]: { enabled: false },
+      };
+    }
   }
   if (!config.customGatekeeper.enabled) {
     activeConfig = {
@@ -228,7 +261,7 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
     "aiGateway.enabled",
     "aiGateway.providers",
     "errorReporting.enabled",
-    "mcp.enabled",
+    ...vendorGatekeepers.map(({ key }) => `${key}.enabled`),
     "customGatekeeper.enabled",
     "observability.enabled",
     "observability.headSamplingRate",
@@ -249,7 +282,7 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
   // to be unique -- only the ones this deployment actually creates are.
   const enabledWorkers: Record<string, boolean> = {
     errorReporter: config.errorReporting.enabled,
-    mcp: config.mcp.enabled,
+    ...Object.fromEntries(vendorGatekeepers.map(({ key }) => [key, config[key].enabled])),
     customGatekeeper: config.customGatekeeper.enabled,
   };
   const workerNames = Object.entries(config.workers)
@@ -308,8 +341,10 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
   if (typeof config.errorReporting.enabled !== "boolean") {
     throw new Error("Error reporting enabled must be a boolean.");
   }
-  if (typeof config.mcp?.enabled !== "boolean") {
-    throw new Error("mcp.enabled must be a boolean.");
+  for (const { key } of vendorGatekeepers) {
+    if (typeof config[key]?.enabled !== "boolean") {
+      throw new Error(`${key}.enabled must be a boolean.`);
+    }
   }
   if (typeof config.customGatekeeper?.enabled !== "boolean") {
     throw new Error("customGatekeeper.enabled must be a boolean.");
@@ -481,7 +516,7 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
   const workshop = structuredClone(bases.workshop);
   const context = structuredClone(bases.context);
   const scheduler = structuredClone(bases.scheduler);
-  const mcp = config.mcp.enabled ? structuredClone(bases.mcp) : undefined;
+  const vendors = enabledVendorGatekeepers(config);
   const customGatekeeper = config.customGatekeeper.enabled
     ? structuredClone(bases.customGatekeeper)
     : undefined;
@@ -497,9 +532,7 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
     // vendor-RPC bindings. The binding name is what picks the /gatekeeper/<name> path.
     { binding: "GATEKEEPER_CONTEXT", service: config.workers.context.name },
     { binding: "GATEKEEPER_SCHEDULER", service: config.workers.scheduler.name },
-    ...(config.mcp.enabled
-      ? [{ binding: "GATEKEEPER_MCP", service: config.workers.mcp!.name }]
-      : []),
+    ...vendors.map(({ key, binding }) => ({ binding, service: config.workers[key]!.name })),
     ...(config.customGatekeeper.enabled
       ? [{ binding: "GATEKEEPER_CUSTOM", service: config.workers.customGatekeeper!.name }]
       : []),
@@ -563,13 +596,14 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
       service: config.workers.scheduler.name,
       entrypoint: "GatekeeperVendor",
     },
-    // No props either: the MCP Gatekeeper scopes its accounts to its own `McpAccount` Durable
-    // Objects, which belong to that Worker's script identity. Only Context takes a prop.
-    ...(config.mcp.enabled ? [{
-      binding: "GATEKEEPER_MCP",
-      service: config.workers.mcp!.name,
+    // No props either: each vendor Gatekeeper scopes its accounts to its own Durable Objects --
+    // MCP's `McpAccount`, GitHub's and Email's `UserAccount` -- which belong to that Worker's script
+    // identity. Only Context takes a prop.
+    ...vendors.map(({ key, binding }) => ({
+      binding,
+      service: config.workers[key]!.name,
       entrypoint: "GatekeeperVendor",
-    }] : []),
+    })),
     ...(config.customGatekeeper.enabled ? [{
       binding: "GATEKEEPER_CUSTOM",
       service: config.workers.customGatekeeper!.name,
@@ -608,20 +642,21 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
   // here without adding a configuration surface for it.
   setCommon(scheduler, config, config.workers.scheduler.name);
 
-  if (mcp) {
-    setCommon(mcp, config, config.workers.mcp!.name);
-    mcp.vars = {
-      // Unlike Context and Scheduler, the MCP Gatekeeper is an OAuth gatekeeper: `getBaseUrl()` in
-      // gatekeeper-mcp/src/mcp.ts builds its connect form and OAuth callback URLs from this, and
-      // falls back to `http://localhost:8787/gatekeeper/mcp` when it is unset. Unset in production
-      // that is not a broken deploy but a broken *redirect*, discovered only when a user tries to
-      // connect a server -- so it is derived here rather than left to the base config.
-      //
-      // The path is the router's `/gatekeeper/<short>` route, and `<short>` is the binding name
-      // minus its prefix, lowercased: GATEKEEPER_MCP -> mcp.
-      ...mcp.vars,
-      BASE_URL: `${origin}/gatekeeper/mcp`,
+  const vendorConfigs: Partial<Record<VendorGatekeeper["key"], ProdWranglerConfig>> = {};
+  for (const { key, binding } of vendors) {
+    const vendor = structuredClone(bases[key]);
+    setCommon(vendor, config, config.workers[key]!.name);
+    vendor.vars = {
+      // Unlike Context and Scheduler, these read `BASE_URL`, and each falls back to
+      // `http://localhost:8787/gatekeeper/<short>` when it is unset. For MCP and GitHub,
+      // `getBaseUrl()` builds the connect form and the OAuth callback URL from it, so unset in
+      // production that is not a broken deploy but a broken *redirect*, discovered only when a user
+      // tries to connect. For Email it is also the mailbox resource namespace and the fetch-handler
+      // prefix, so no mailbox could ever be bound. Derived here rather than left to the base config.
+      ...vendor.vars,
+      BASE_URL: `${origin}${gatekeeperPath(binding)}`,
     };
+    vendorConfigs[key] = vendor;
   }
 
   if (customGatekeeper) {
@@ -638,7 +673,7 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
 
   return {
     router, workshop, context, scheduler,
-    ...(mcp && { mcp }),
+    ...vendorConfigs,
     ...(customGatekeeper && { customGatekeeper }),
     ...(errorReporter && { errorReporter }),
   };
@@ -686,11 +721,11 @@ export function buildCommands(config: DeploymentConfig): BuildCommand[] {
     // The Scheduler's `build` nests the same cached `vp run build:app`, so it needs the same pair.
     { args: submoduleBuild("@gadgets/gatekeeper-scheduler", "build:app") },
     { args: submoduleBuild("@gadgets/gatekeeper-scheduler") },
-    // One step, unlike the pair above: the MCP Gatekeeper's `build` is a Vite+ *task* declaring
-    // `dependsOn: ["build:configurator"]` (cloudflare-os/scripts/gatekeeper-configurator-vite-config.ts),
+    // One step each, unlike the pairs above: every vendor Gatekeeper's `build` is a Vite+ *task*
+    // declaring `dependsOn: ["build:configurator"]` (cloudflare-os/scripts/gatekeeper-configurator-vite-config.ts),
     // so `--no-cache` reaches the codegen through the dependency rather than being swallowed by a
     // nested `vp run` carrying its own flag.
-    ...(config.mcp.enabled ? [{ args: submoduleBuild("@gadgets/mcp-gatekeeper") }] : []),
+    ...enabledVendorGatekeepers(config).map(({ pkg }) => ({ args: submoduleBuild(pkg) })),
     ...(config.customGatekeeper.enabled ? [{ args: ownBuild("custom-gatekeeper") }] : []),
     ...(config.errorReporting.enabled ? [{ args: ownBuild("error-reporter") }] : []),
     // Access mode is a build-time constant in the frontend bundle (`src/useAuth.ts`), so it is set
@@ -798,6 +833,23 @@ function reportAiGateway(config: DeploymentConfig): void {
     `--name ${config.workers.workshop.name}\n`);
 }
 
+// The GitHub Gatekeeper deploys without its OAuth App credentials and answers a connect attempt
+// with a "not configured" page until they are installed. They are not in `secrets.required`: that
+// would make wrangler refuse the first deploy, before the Worker the secrets belong to exists.
+// Printed after the deploy, which is when they can be run.
+function reportGitHubSecrets(config: DeploymentConfig): void {
+  if (!config.github.enabled) return;
+  const binding = vendorGatekeepers.find(({ key }) => key === "github")!.binding;
+  const command = (secret: string) =>
+    `  CLOUDFLARE_ACCOUNT_ID=${config.accountId} pnpm exec wrangler secret put ${secret} ` +
+    `--name ${config.workers.github!.name}`;
+  console.warn(
+    `\nThe GitHub Gatekeeper needs a GitHub OAuth App (not a GitHub App) with authorization ` +
+    `callback URL\n  ${publicOrigin(config)}${gatekeeperPath(binding)}/oauth\n` +
+    `If its credentials are not installed yet, enter them interactively. Each command deploys a ` +
+    `new version of the Worker:\n${command("CLIENT_ID")}\n${command("CLIENT_SECRET")}\n`);
+}
+
 async function main(): Promise<void> {
   requireSubmodule();
   const config = await readDeployment(join(root, "deployment.jsonc"));
@@ -807,6 +859,8 @@ async function main(): Promise<void> {
     context: await readJsonc(join(root, packageDirs.context, "wrangler.jsonc")),
     scheduler: await readJsonc(join(root, packageDirs.scheduler, "wrangler.jsonc")),
     mcp: await readJsonc(join(root, packageDirs.mcp, "wrangler.jsonc")),
+    github: await readJsonc(join(root, packageDirs.github, "wrangler.jsonc")),
+    email: await readJsonc(join(root, packageDirs.email, "wrangler.jsonc")),
     customGatekeeper: await readJsonc(join(root, packageDirs.customGatekeeper, "wrangler.jsonc")),
     errorReporter: await readJsonc(join(root, packageDirs.errorReporter, "wrangler.jsonc")),
   });
@@ -827,8 +881,8 @@ async function main(): Promise<void> {
     }
     deployWorker(packageDirs.context, deployArgs);
     deployWorker(packageDirs.scheduler, deployArgs);
-    if (config.mcp.enabled) {
-      deployWorker(packageDirs.mcp, deployArgs);
+    for (const { key } of enabledVendorGatekeepers(config)) {
+      deployWorker(packageDirs[key], deployArgs);
     }
     if (config.customGatekeeper.enabled) {
       deployWorker(packageDirs.customGatekeeper, deployArgs);
@@ -836,6 +890,7 @@ async function main(): Promise<void> {
     deployWorker(packageDirs.workshop, deployArgs);
     // Last: it binds every one of the above.
     deployWorker(packageDirs.router, deployArgs);
+    reportGitHubSecrets(config);
   } finally {
     await Promise.all(Object.values(generatedPaths).map((path) => rm(path, { force: true })));
   }

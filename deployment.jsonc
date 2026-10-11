@@ -55,7 +55,7 @@
   "access": {
     "issuer": "https://veerstudio.cloudflareaccess.com",
     "audience": "14ac9b99f0da63268b12320a9a8b1e2fae50b39ff48b28157a0b3e0d300e94ed",
-    "admins": ["chacha@veer.studio"]
+    "admins": ["chacha@veer.studio", "weareveerstudio@gmail.com"]
   },
 
   // Model catalog served through Cloudflare AI Gateway. Enabled by default: the Workshop reaches

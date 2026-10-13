@@ -176,8 +176,8 @@ at `/gatekeeper/probe`.
 - Compatibility: date `2026-09-04`, flags `allow_irrevocable_stub_storage` (later gates persist
   verifier stubs) and `nodejs_als` (gatekeeper-kit's logger). `workers_dev` and preview URLs off, as
   for every Worker.
-- Rollback: set `probe.enabled: false` and redeploy only after the Workshop has stopped needing the
-  binding (see section 10). Worker version rollback via `wrangler rollback` for code-only changes.
+- Rollback: set the probe's mode to disabled in `/admin` (no deploy); `wrangler rollback` for
+  code-only changes; `probe.enabled: false` plus a deploy to unbind it. The report has the full plan.
 
 ## 9. Verification
 
@@ -202,7 +202,10 @@ Manual (after deploy): see the report, `docs/studio-os/reports/foundation.md`.
 
 1. **Probe lifetime.** Recommendation: deploy it, verify, then set its mode to disabled in `/admin`
    and keep the Worker deployed as a lab gate. Its accounts persist once provisioned, and dropping
-   the binding leaves them invisible rather than gone.
+   the binding leaves them invisible rather than gone. Disabling deletes each workspace's capsule
+   storage (the journal, so pending agent notes) on its next open; the store and accounts stay.
+   The mode starts as `optional`, so each person opts in on the Connectors page; `enabled`
+   provisions it for everyone, contractors included.
 2. **Agent writes in the audit log.** The brief asks for human edits; this spec also logs agent
    applies so the log is a full change history. Say if you want human edits only.
 3. **Archive is human-only.** Agents can add notes but not archive them, mirroring "completing work

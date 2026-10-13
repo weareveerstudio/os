@@ -29,7 +29,7 @@ import type {
   GatekeeperUserVerifier,
   ResourceDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
-import { actionKind, agentWrite, appliedActionKey } from "@veer/studio-kit/actions";
+import { actionKind, agentWrite, operationId } from "@veer/studio-kit/actions";
 import { requireId } from "@veer/studio-kit/guards";
 import {
   BASELINE,
@@ -45,7 +45,10 @@ import TYPES_CODE from "./types.txt";
 /** What `getSingletonGatekeeperClass()` imbues the facet with. */
 export type ProbeFacetProps = { accountId: string };
 
-/** The agent's actions and their payloads. */
+/**
+ * The agent's actions and their payloads. A note's id is minted at submit and doubles as the
+ * write's operation id: unique, and kept in the payload.
+ */
 export type ProbeActions = {
   addNote: { noteId: string; body: string; queuedAt: number };
 };
@@ -73,9 +76,8 @@ const actions = defineActions<ProbeHost, ProbeActions>({
         .finish(),
       implementsRevert: false,
     }),
-    apply: async (payload, host, { id }) => {
+    apply: async (payload, host) => {
       await host.store().applyAgentNote({
-        key: appliedActionKey(host.workspaceId, id),
         noteId: payload.noteId,
         body: payload.body,
         accountId: host.accountId,
@@ -197,7 +199,7 @@ export class ProbeSessionImpl extends RpcTarget implements ProbeSession {
 
   async addNote(body: string): Promise<ProbeNote> {
     const payload = {
-      noteId: crypto.randomUUID(),
+      noteId: operationId(),
       body: requireNoteBody(body),
       queuedAt: (this.#deps.now ?? Date.now)(),
     };

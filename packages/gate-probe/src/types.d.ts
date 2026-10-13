@@ -9,7 +9,10 @@ export type ProbeAuthor =
 export interface ProbeNote {
   id: string;
   body: string;
-  /** ISO 8601. For a pending note, when it was queued. */
+  /**
+   * ISO 8601. For a pending note, when it was queued; once approved, when it was added to the
+   * shared notes, so the value changes at approval.
+   */
   createdAt: string;
   author: ProbeAuthor;
   /** Archived notes are hidden unless asked for. Only people archive notes, in the Probe app. */
@@ -27,7 +30,8 @@ export interface ProbeNote {
  */
 export interface ProbeSession {
   /**
-   * Lists notes, newest first, including this workspace's pending ones.
+   * Lists notes, newest first, including this workspace's pending ones. Returns at most the 500
+   * newest stored notes, plus pending ones.
    * @param options `includeArchived` also returns archived notes.
    */
   listNotes(options?: { includeArchived?: boolean }): Promise<ProbeNote[]>;
@@ -41,8 +45,11 @@ export interface ProbeSession {
 
   /**
    * Adds a note. It is queued for approval and visible to this workspace at once, with
-   * `pending: true`; keep working without waiting for it.
-   * @param body The note, 1 to 2000 characters. Line breaks are kept.
+   * `pending: true`; keep working without waiting for it. Fails while this workspace already has 50
+   * notes awaiting a decision.
+   * @param body The note, 1 to 2000 characters after trimming. Line breaks and tabs are kept; other
+   *   control characters and invisible formatting characters (such as bidirectional overrides) are
+   *   refused, except the zero-width joiner and non-joiner.
    * @returns The pending note, with its final id.
    */
   addNote(body: string): Promise<ProbeNote>;

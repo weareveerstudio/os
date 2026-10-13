@@ -21,6 +21,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { JOINERS } from "./guards.js";
 
 /** What a person has said about themselves. */
 export type AccountProfile = { displayName: string | null };
@@ -40,13 +41,15 @@ const ADMIN_MARK_KEY = "admin-mark";
  */
 export function normalizeDisplayName(name: unknown): string {
   if (typeof name !== "string") throw new Error("Display name must be text.");
+  if (!name.isWellFormed()) throw new Error("Display name contains invalid characters.");
   const trimmed = name.normalize("NFC").replace(/\s+/g, " ").trim();
   if (!trimmed) throw new Error("Display name can't be empty.");
   if ([...trimmed].length > MAX_DISPLAY_NAME_LENGTH) {
     throw new Error(`Display name must be at most ${MAX_DISPLAY_NAME_LENGTH} characters.`);
   }
-  // Format and control characters can make two different names render identically.
-  if (/[\p{Cc}\p{Cf}]/u.test(trimmed)) {
+  // Format and control characters can make two different names render identically. The joiners
+  // are exempt, as in requireText: Persian names need the non-joiner.
+  if (/[\p{Cc}\p{Cf}]/u.test(trimmed.replace(JOINERS, ""))) {
     throw new Error("Display name can't contain control or formatting characters.");
   }
   return trimmed;

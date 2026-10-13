@@ -137,7 +137,10 @@ Avoid the `withholdFromObservers` scope: a refused read latches the binding as u
   mark). `revoke()` clears per-account state only, never studio data.
 - The kit's action journal lives in **facet storage**, which is per workspace, so a simulation is
   visible only inside that workspace. `applyAction` writes to the shared store and must be
-  idempotent on `${workspaceId}:${actionId}`.
+  idempotent on an **operation id minted at submit and kept in the payload** (studio-kit's
+  `operationId()`). Not on `${workspaceId}:${actionId}`: a capsule re-created after `disabled` or a
+  removed account starts a fresh journal whose ids restart at 1 under the same workspace id, so that
+  key collides and the approved write is skipped (found in the Foundation review).
 
 ### Admin-only (Finance)
 

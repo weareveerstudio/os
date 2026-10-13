@@ -6,8 +6,9 @@
  * the store through `applyAction` after the Workshop's own approval record; gates log those too, so
  * one table holds the store's complete change history.
  *
- * Append-only is enforced by SQLite triggers, not by convention: an UPDATE or DELETE on the table
- * aborts. Only `deleteAll()` on the whole Durable Object can remove rows.
+ * Append-only is enforced by SQLite triggers, not by convention: an UPDATE, a DELETE, or an
+ * `INSERT OR REPLACE` over an existing row aborts. Only `deleteAll()` on the whole Durable Object can
+ * remove rows.
  */
 
 import type { AuditActor, AuditDetail, AuditEntry, AuditPage } from "./audit-types.js";
@@ -40,6 +41,10 @@ export const AUDIT_LOG_MIGRATIONS: readonly MigrationStep[] = [{
     `CREATE TRIGGER ${TABLE}_no_update BEFORE UPDATE ON ${TABLE}
       BEGIN SELECT RAISE(ABORT, '${TABLE} is append-only'); END`,
     `CREATE TRIGGER ${TABLE}_no_delete BEFORE DELETE ON ${TABLE}
+      BEGIN SELECT RAISE(ABORT, '${TABLE} is append-only'); END`,
+    // `INSERT OR REPLACE` over an existing seq deletes the old row without firing the trigger above.
+    `CREATE TRIGGER ${TABLE}_no_replace BEFORE INSERT ON ${TABLE}
+      WHEN EXISTS (SELECT 1 FROM ${TABLE} WHERE seq = NEW.seq)
       BEGIN SELECT RAISE(ABORT, '${TABLE} is append-only'); END`,
   ],
 }];

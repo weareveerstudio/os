@@ -16,6 +16,9 @@ export function requireAdmin(isAdmin: boolean, what: string): void {
   if (isAdmin !== true) throw new Error(`${what} is available to admins only.`);
 }
 
+/** Zero-width non-joiner and joiner: format characters that ordinary text needs. */
+export const JOINERS = /[\u200c\u200d]/g;
+
 /**
  * Trims free text and checks its length and characters.
  * @param value The candidate value.
@@ -29,12 +32,16 @@ export function requireText(
 ): string {
   const { label, max, multiline = false } = options;
   if (typeof value !== "string") throw new Error(`${label} must be text.`);
+  // A lone surrogate is stored as a replacement character, so the text written would differ from
+  // the text an approver read.
+  if (!value.isWellFormed()) throw new Error(`${label} contains invalid characters.`);
   const text = value.normalize("NFC").replace(/\r\n?/g, "\n").trim();
   if (!text) throw new Error(`${label} can't be empty.`);
   if ([...text].length > max) throw new Error(`${label} must be at most ${max} characters.`);
-  // Format characters (bidi overrides, zero-width joiners) can make text read differently from
-  // what it is; control characters other than the allowed line breaks have no business here.
-  const checked = multiline ? text.replace(/[\n\t]/g, "") : text;
+  // Format characters (bidi overrides, invisible spaces) can make text read differently from what
+  // it is; control characters other than the allowed line breaks have no business here. The two
+  // joiners are exempt: Persian needs the non-joiner, and emoji sequences the joiner.
+  const checked = (multiline ? text.replace(/[\n\t]/g, "") : text).replace(JOINERS, "");
   if (/[\p{Cc}\p{Cf}]/u.test(checked)) {
     throw new Error(`${label} can't contain control or formatting characters.`);
   }

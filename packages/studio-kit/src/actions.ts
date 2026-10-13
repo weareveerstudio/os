@@ -8,9 +8,9 @@
  * forgotten one kind at a time.
  *
  * The kit's journal lives in the facet's storage, which is per workspace. `applyAction` writes to
- * the studio-wide store, and the store makes the write idempotent on
- * {@link appliedActionKey}(workspaceId, actionId) with {@link AppliedActions}, recorded in the same
- * transaction as the write.
+ * the studio-wide store, and the store makes the write idempotent on an {@link operationId} minted
+ * when the action was submitted, claimed with {@link AppliedActions} in the same transaction as the
+ * write.
  */
 
 import type { ActionDefinition } from "@gadgets/gatekeeper-kit/actions";
@@ -60,18 +60,18 @@ export function agentWrite<Payload, Host>(
 }
 
 /**
- * The idempotency key for one applied action. A facet's action ids restart at 1 in every
- * workspace, so the workspace id is part of the key.
- * @param workspaceId The facet's `ctx.id.toString()`.
- * @param actionId The kit journal's action id.
- * @returns `<workspaceId>:<actionId>`.
+ * Mints the idempotency key for one agent write. Mint it when the action is submitted, store it in
+ * the action's payload, and claim it with {@link AppliedActions} when the action applies.
+ *
+ * Not the journal's action id, even qualified by the workspace: a workspace's capsule is re-created
+ * with an empty journal whenever it is removed and added back (the gate disabled and re-enabled in
+ * `/admin`, or an optional account removed and re-added), and the new journal numbers its actions
+ * from 1 again under the same workspace id. A key built from those collides with one the store
+ * already holds, and the approved write is silently skipped.
+ * @returns A random UUID.
  */
-export function appliedActionKey(workspaceId: string, actionId: number): string {
-  if (!workspaceId) throw new Error("appliedActionKey needs a workspace id.");
-  if (!Number.isSafeInteger(actionId) || actionId < 1) {
-    throw new Error(`Action id ${actionId} is not a positive integer.`);
-  }
-  return `${workspaceId}:${actionId}`;
+export function operationId(): string {
+  return crypto.randomUUID();
 }
 
 const TABLE = "studio_applied_actions";
@@ -108,7 +108,7 @@ export class AppliedActions {
 
   /**
    * Records `key` as applied.
-   * @param key From {@link appliedActionKey}.
+   * @param key An {@link operationId} from the action's payload.
    * @returns True the first time, false on every replay.
    */
   claim(key: string): boolean {
@@ -118,7 +118,7 @@ export class AppliedActions {
   }
 
   /**
-   * @param key From {@link appliedActionKey}.
+   * @param key An {@link operationId} from the action's payload.
    * @returns Whether `key` was applied.
    */
   has(key: string): boolean {

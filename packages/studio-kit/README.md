@@ -18,7 +18,7 @@ Everything here is either a plain helper or a Durable Object reached through the
 | `./stores` | `SHARED_STORE_NAME`, `sharedStore(ns)`, `storeName(partition)` |
 | `./sql` | `migrate(storage, steps)`: append-only, transactional schema steps |
 | `./audit-log` | `AuditLog`, `AUDIT_LOG_MIGRATIONS`: append-only (trigger-enforced) change history |
-| `./actions` | `agentWrite` (auto-approvable, continue-with-simulation), `actionKind`, `appliedActionKey`, `AppliedActions` |
+| `./actions` | `agentWrite` (auto-approvable, continue-with-simulation), `actionKind`, `operationId`, `AppliedActions` |
 | `./observers` | `observation()` descriptions, `BASELINE`, the kit's gate and strategies |
 | `./guards` | `requireAdmin`, `requireText`, `requireId` |
 | `./testing` | `FakeApprovalQueue`, `StudioFacetHost`, `rejectionMessage` for workerd suites |
@@ -31,8 +31,9 @@ Everything here is either a plain helper or a Durable Object reached through the
 
 - **Every agent write is `agentWrite(...)`.** The Workshop's approval queue stops at the first action
   that needs a human, so one approval-only kind stalls every later write from the gate.
-- **`applyAction` is idempotent** on `appliedActionKey(workspaceId, actionId)`, claimed with
-  `AppliedActions` in the same transaction as the write.
+- **`applyAction` is idempotent** on an `operationId()` minted at submit and kept in the payload,
+  claimed with `AppliedActions` in the same transaction as the write. Never on the journal's action
+  id: it restarts at 1 when a workspace's capsule is re-created.
 - **The `ui` is flat.** The host's rate limiter forwards top-level method names only. Implement the
   app's interface as `class XAppApi extends RpcTarget implements FlatUi<XUi>`.
 - **The app never reloads itself.** The host accepts one handshake per mount.

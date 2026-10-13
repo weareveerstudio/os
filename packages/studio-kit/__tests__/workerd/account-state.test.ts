@@ -61,6 +61,8 @@ describe("StudioAccountState", () => {
 
   it("normalizes in isolation too", () => {
     expect(normalizeDisplayName("Zoë")).toBe("Zoë");
+    expect(normalizeDisplayName("شهر\u200cیار")).toBe("شهر\u200cیار");
+    expect(() => normalizeDisplayName("a\udc00")).toThrow(/invalid characters/);
     expect(() => normalizeDisplayName(42)).toThrow(/must be text/);
   });
 });

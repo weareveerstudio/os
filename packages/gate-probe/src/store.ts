@@ -36,8 +36,7 @@ export type PersonActor = Extract<AuditActor, { kind: "person" }>;
 
 /** An approved agent note, as `applyAction` hands it over. */
 export type AgentNote = {
-  /** `appliedActionKey(workspaceId, actionId)`. */
-  key: string;
+  /** Minted at submit; also the write's operation id. */
   noteId: string;
   body: string;
   accountId: string;
@@ -188,7 +187,7 @@ export class ProbeNotesStore extends DurableObject {
     const text = requireNoteBody(note.body);
     requireId(note.noteId, "Note");
     this.ctx.storage.transactionSync(() => {
-      if (!this.#applied.claim(note.key)) return;
+      if (!this.#applied.claim(note.noteId)) return;
       const inserted = this.ctx.storage.sql.exec(
         `INSERT INTO notes (id, body, created_at, author_kind, author_account, author_workspace)
           VALUES (?, ?, ?, 'agent', ?, ?) ON CONFLICT (id) DO NOTHING`,

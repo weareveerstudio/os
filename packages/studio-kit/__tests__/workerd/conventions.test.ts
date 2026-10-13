@@ -8,7 +8,7 @@ import {
   AppliedActions,
   actionKind,
   agentWrite,
-  appliedActionKey,
+  operationId,
 } from "../../src/actions.js";
 import { studioAccountDescription, studioVendorDescription, svgIcon } from "../../src/describe.js";
 import { requireAdmin, requireId, requireText } from "../../src/guards.js";
@@ -44,21 +44,22 @@ describe("action conventions", () => {
     expect(actions.bind({} as never, {}).autoApprovableKinds()).toEqual([kind]);
   });
 
-  it("keys applied actions by workspace and action id", () => {
-    expect(appliedActionKey("ws-1", 7)).toBe("ws-1:7");
-    expect(() => appliedActionKey("", 1)).toThrow(/workspace id/);
-    expect(() => appliedActionKey("ws-1", 0)).toThrow(/positive integer/);
+  it("mints a fresh operation id for every write", () => {
+    const first = operationId();
+    expect(first).toMatch(/^[0-9a-f-]{36}$/);
+    expect(operationId()).not.toBe(first);
   });
 
   it("claims each applied action once", async () => {
     await runInDurableObject(env.KIT_STORE.getByName("applied"), (_instance, state) => {
       migrate(state.storage, APPLIED_ACTIONS_MIGRATIONS);
       const applied = new AppliedActions(state.storage.sql);
-      expect(applied.has("ws-1:1")).toBe(false);
-      expect(applied.claim("ws-1:1")).toBe(true);
-      expect(applied.claim("ws-1:1")).toBe(false);
-      expect(applied.claim("ws-2:1")).toBe(true);
-      expect(applied.has("ws-1:1")).toBe(true);
+      const op = operationId();
+      expect(applied.has(op)).toBe(false);
+      expect(applied.claim(op)).toBe(true);
+      expect(applied.claim(op)).toBe(false);
+      expect(applied.claim(operationId())).toBe(true);
+      expect(applied.has(op)).toBe(true);
     });
   });
 });
@@ -118,6 +119,14 @@ describe("guards", () => {
     expect(() => requireText("a​b", { label: "Note", max: 20, multiline: true }))
       .toThrow(/formatting/);
     expect(() => requireText(5, { label: "Note", max: 20 })).toThrow(/must be text/);
+    // A lone surrogate would be stored altered.
+    expect(() => requireText("a\ud800b", { label: "Note", max: 20 })).toThrow(/invalid characters/);
+    // The joiners real text needs: Persian's non-joiner, and an emoji ZWJ sequence.
+    expect(requireText("می\u200cخواهم", { label: "Note", max: 20 })).toBe("می\u200cخواهم");
+    expect(requireText("\u{1F469}\u200d\u{1F4BB}", { label: "Note", max: 20 }))
+      .toBe("\u{1F469}\u200d\u{1F4BB}");
+    // Bidi overrides stay out.
+    expect(() => requireText("a\u202eb", { label: "Note", max: 20 })).toThrow(/formatting/);
   });
 
   it("accepts only minted ids", () => {

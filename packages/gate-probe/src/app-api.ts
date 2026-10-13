@@ -6,7 +6,7 @@
 
 import { RpcTarget } from "cloudflare:workers";
 import { validateRpc } from "capnweb-validate";
-import type { StudioAccountState } from "@veer/studio-kit/account-state";
+import { normalizeDisplayName, type StudioAccountState } from "@veer/studio-kit/account-state";
 import type { AuditPage } from "@veer/studio-kit/audit-log";
 import type { FlatUi } from "@veer/studio-kit/app/ui-client";
 import { requireAdmin } from "@veer/studio-kit/guards";
@@ -55,11 +55,14 @@ export class ProbeAppApi extends RpcTarget implements FlatUi<ProbeUi> {
 
   async setDisplayName(name: string): Promise<ProbeViewer> {
     const { state, store, accountId, isAdmin } = this.#deps;
+    const next = normalizeDisplayName(name);
     const previous = (await state.getProfile()).displayName;
-    const { displayName } = await state.setDisplayName(name);
-    if (displayName !== previous && displayName !== null) {
-      await store.recordNameChange({ kind: "person", accountId, name: displayName, isAdmin }, previous);
-    }
+    if (next === previous) return { isAdmin, displayName: previous };
+    // Audited first: the name and its audit row live in different Durable Objects, so they cannot
+    // commit together. A failure after this row leaves a retry that records it again, never a change
+    // with no record.
+    await store.recordNameChange({ kind: "person", accountId, name: next, isAdmin }, previous);
+    const { displayName } = await state.setDisplayName(next);
     return { isAdmin, displayName };
   }
 

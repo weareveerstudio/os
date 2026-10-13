@@ -47,6 +47,10 @@ describe("AuditLog", () => {
       expect(() => state.storage.sql.exec("UPDATE studio_audit_log SET target = 'forged'"))
         .toThrow(/append-only/);
       expect(() => state.storage.sql.exec("DELETE FROM studio_audit_log")).toThrow(/append-only/);
+      expect(() => state.storage.sql.exec(
+        `INSERT OR REPLACE INTO studio_audit_log (seq, at, actor_kind, actor_account, action)
+          VALUES (1, 0, 'person', 'forger', 'note.add')`)).toThrow(/append-only/);
+      expect(new AuditLog(state.storage.sql).list().entries[0].actor.accountId).toBe("acct-1");
       expect(new AuditLog(state.storage.sql).list().entries).toHaveLength(1);
     });
   });

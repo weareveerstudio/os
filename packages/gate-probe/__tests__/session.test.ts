@@ -112,8 +112,7 @@ describe("ProbeSession", () => {
     // A replay, as after a lost reply, writes nothing more.
     await host.applyAction(spec, actionId);
     await store().applyAgentNote({
-      key: `${workspaceId}:${actionId}`, noteId: note.id, body: "Approved note",
-      accountId: "acct-owner", workspaceId,
+      noteId: note.id, body: "Approved note", accountId: "acct-owner", workspaceId,
     });
     const audit = await store().listAudit({ limit: 200 });
     expect(audit.entries.filter((entry) => entry.target === note.id)).toEqual([
@@ -122,6 +121,26 @@ describe("ProbeSession", () => {
         actor: { kind: "agent", accountId: "acct-owner", workspaceId },
       }),
     ]);
+  });
+
+  it("applies notes from a re-created capsule whose action ids start again at 1", async () => {
+    // Disabling and re-enabling the gate, or removing and re-adding an account, gives the workspace
+    // a new capsule: same workspace id, empty journal, action ids from 1 again.
+    const host = workspace("recreated");
+    const first = new FakeApprovalQueue();
+    const before = await (await host.startSession(spec, first) as unknown as ProbeSession)
+      .addNote("From the first capsule");
+    await host.applyAction(spec, first.submissions[0].action);
+
+    const recreated: FacetSpec = { ...spec, name: "gatekeeper7" };
+    const second = new FakeApprovalQueue();
+    const after = await (await host.startSession(recreated, second) as unknown as ProbeSession)
+      .addNote("From the re-created capsule");
+    expect(second.submissions[0].action).toBe(first.submissions[0].action);
+    await host.applyAction(recreated, second.submissions[0].action);
+
+    expect(await store().getNote(before.id)).toMatchObject({ body: "From the first capsule" });
+    expect(await store().getNote(after.id)).toMatchObject({ body: "From the re-created capsule" });
   });
 
   it("drops a rejected note", async () => {

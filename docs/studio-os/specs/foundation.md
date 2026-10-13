@@ -37,7 +37,8 @@ From [`../architecture.md`](../architecture.md):
 - Decision 7 (Finance) shapes only the admin mark here; the probe is not restricted.
 - Platform constraints: flat `ui` API, no popups or downloads in the iframe, account description
   frozen at creation, shared data in fixed-name Durable Objects, journal in facet storage,
-  `applyAction` idempotent on `${workspaceId}:${actionId}`.
+  `applyAction` idempotent on an operation id minted at submit (amended in review: the canon's
+  `${workspaceId}:${actionId}` collides once a capsule is re-created).
 
 ## 3. Design
 
@@ -115,7 +116,9 @@ export interface ProbeSession {
   before approval. A pending note whose id already exists in the store is a known no-effect step.
 - Fence: `"none"`. The probe has no provider connection, so nothing can change authority under an
   action.
-- `applyAction` writes to the store keyed `${workspaceId}:${actionId}`. A replay is a no-op.
+- `applyAction` writes to the store, claiming the note's id (minted at submit, so it doubles as the
+  operation id) in the applied-action ledger. A replay, or a re-created capsule whose action ids
+  restart at 1, writes nothing twice and skips nothing.
 - `rejectAction` drops the journal record; nothing was written, so nothing to undo.
 - `revertAction` returns a message pointing at archive in the app (`implementsRevert: false`).
 - Agent catalog: `null` (no discovery index). Slash commands: none.

@@ -41,6 +41,11 @@
     // requests and repositories. Bound as GATEKEEPER_GITHUB and served at /gatekeeper/github.
     "github": { "name": "veeros-gk-github" },
 
+    // The Foundation probe, the first VEER Studio gate: packages/gate-probe. Not deployed while
+    // probe.enabled is false, so this name is not read yet. Permanent once deployed: its Durable
+    // Objects hold every account's display name and the studio's notes.
+    "probe": { "name": "veeros-gk-probe" },
+
     // All three disabled below, so none of these names is read. Kept for the next iteration.
     // "email": { "name": "veeros-gk-email" },
     // "customGatekeeper": { "name": "veeros-gk-custom" },
@@ -121,6 +126,12 @@
     "name": "VEER.studio",
     "message": "Your Creative Partner"
   },
+
+  // VEER Studio gates: Gatekeepers built from this repository (packages/gate-<key>), bound as
+  // GATEKEEPER_<KEY> and served at /gatekeeper/<key>. Off: nothing is built, deployed or bound, and
+  // every other Worker's generated config is unchanged. Turn one on only with a deploy plan; see
+  // docs/studio-os/reports/foundation.md.
+  "probe": { "enabled": false },
 
   // Explicit backend issue reports go to a private Worker that emits structured console errors.
   // Set release to a commit/version when your deployment pipeline has one.

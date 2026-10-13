@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { parse, type ParseError } from "jsonc-parser";
 import { aiGatewayPlan, buildCommands, generateConfigs, validateConfig } from "./deploy.ts";
@@ -9,6 +10,7 @@ import type {
   GeneratedConfigs,
   ProdWranglerConfig,
 } from "./deployment-config.ts";
+import { goldenBases, goldenDeployments } from "./testdata/golden-fixture.ts";
 
 const validConfig: DeploymentConfig = {
   accountId: "0123456789abcdef0123456789abcdef",
@@ -23,6 +25,7 @@ const validConfig: DeploymentConfig = {
     email: { name: "acme-cloudflare-os-email" },
     customGatekeeper: { name: "acme-cloudflare-os-custom" },
     errorReporter: { name: "acme-cloudflare-os-errors" },
+    probe: { name: "acme-cloudflare-os-probe" },
   },
   access: {
     issuer: "https://acme.cloudflareaccess.com",
@@ -47,6 +50,8 @@ const validConfig: DeploymentConfig = {
   email: { enabled: false },
   customGatekeeper: { enabled: true, name: "Acme", message: "Use the company handbook." },
   errorReporting: { enabled: true, environment: "production", release: "abc123" },
+  // Off here, like GitHub and Email: the tests below that need it turn it on.
+  probe: { enabled: false },
   resources: {
     blueprintsKvNamespaceId: "blueprints-kv-id",
     avatarsKvNamespaceId: "avatars-kv-id",
@@ -86,6 +91,7 @@ async function baseConfigs(): Promise<BaseConfigs> {
     email: await baseConfig("../cloudflare-os/packages/gatekeeper-email/wrangler.jsonc"),
     customGatekeeper: await baseConfig("../packages/custom-gatekeeper/wrangler.jsonc"),
     errorReporter: await baseConfig("../packages/error-reporter/wrangler.jsonc"),
+    probe: await baseConfig("../packages/gate-probe/wrangler.jsonc"),
   };
 }
 
@@ -851,4 +857,125 @@ test("skips the Error Reporter build when error reporting is disabled", () => {
   });
   const commands = buildCommands(config).map(({ args }) => args.join(" "));
   assert.equal(commands.some((command) => command.includes("error-reporter")), false);
+});
+
+// ---- Studio gates ---------------------------------------------------------------------------
+
+/**
+ * `main`'s generator output for the golden fixtures, recorded before studio gates existed. Holding
+ * every studio gate off must reproduce it byte for byte: the generated configs are what wrangler
+ * deploys, so any drift is a change to a live Worker.
+ */
+const golden = JSON.parse(readFileSync(new URL("./testdata/generated-golden.json", import.meta.url), "utf8")) as
+  Record<string, Record<string, unknown>>;
+
+test("keeps every existing Worker's generated config byte-identical while studio gates are off", () => {
+  assert.deepEqual(Object.keys(goldenDeployments), Object.keys(golden));
+  for (const [name, deployment] of Object.entries(goldenDeployments)) {
+    const generated = generateConfigs(deployment, goldenBases);
+    assert.deepEqual(Object.keys(generated), Object.keys(golden[name]), name);
+    for (const [worker, config] of Object.entries(generated)) {
+      assert.equal(
+        JSON.stringify(config, null, 2), JSON.stringify(golden[name][worker], null, 2), `${name}: ${worker}`);
+    }
+  }
+});
+
+test("adds no build step for a disabled studio gate", () => {
+  for (const deployment of Object.values(goldenDeployments)) {
+    assert.ok(!buildCommands(deployment).some(({ args }) => args.includes("@veer/gate-probe")));
+  }
+});
+
+/** {@link validConfig} with the probe turned on. */
+function withProbe(): DeploymentConfig {
+  return variant((c) => { c.probe = { enabled: true }; });
+}
+
+test("binds an enabled studio gate once on the router and once on the Workshop, last", async () => {
+  const bases = await baseConfigs();
+  const off = generateConfigs(validConfig, bases);
+  const on = generateConfigs(withProbe(), bases);
+
+  // Bare on the router, which forwards /gatekeeper/probe; vendor RPC with no props on the Workshop.
+  assert.deepEqual(on.router.services!.at(-1), {
+    binding: "GATEKEEPER_PROBE", service: "acme-cloudflare-os-probe",
+  });
+  assert.deepEqual(on.workshop.services!.at(-1), {
+    binding: "GATEKEEPER_PROBE", service: "acme-cloudflare-os-probe", entrypoint: "GatekeeperVendor",
+  });
+  for (const list of ["router", "workshop"] as const) {
+    assert.equal(on[list].services!.filter(({ binding }) => binding === "GATEKEEPER_PROBE").length, 1);
+    // Exactly one binding more; everything else in place.
+    assert.deepEqual(on[list].services!.slice(0, -1), off[list].services, list);
+    assert.equal(
+      JSON.stringify({ ...on[list], services: undefined }),
+      JSON.stringify({ ...off[list], services: undefined }), list);
+  }
+  // No other Worker changes.
+  for (const worker of Object.keys(off) as (keyof GeneratedConfigs)[]) {
+    if (worker === "router" || worker === "workshop") continue;
+    assert.equal(JSON.stringify(on[worker]), JSON.stringify(off[worker]), worker);
+  }
+});
+
+test("generates the probe's config from its own base, with no public route", async () => {
+  const bases = await baseConfigs();
+  const probe = generateConfigs(withProbe(), bases).probe!;
+
+  assert.equal(probe.name, "acme-cloudflare-os-probe");
+  assert.equal(probe.account_id, validConfig.accountId);
+  assert.deepEqual(probe.vars, { BASE_URL: "https://os.example.com/gatekeeper/probe" });
+  assert.deepEqual(probe.compatibility_flags, ["allow_irrevocable_stub_storage", "nodejs_als"]);
+  assert.deepEqual(probe.migrations, bases.probe.migrations);
+  assert.equal(probe.main, ".wrangler/validate/src/worker.ts");
+  assert.equal(probe.workers_dev, false);
+  assert.equal(probe.routes, undefined);
+  assert.equal(probe.preview_urls, false);
+  assert.equal(probe.secrets, undefined);
+  assert.equal(probe.observability!.head_sampling_rate, 0.5);
+});
+
+test("derives the probe's BASE_URL from a workers.dev origin too", async () => {
+  const config = variant((c) => {
+    c.probe = { enabled: true };
+    c.workers.router.route = { workersDev: true };
+    c.publicBaseUrl = "https://acme-cloudflare-os.acme.workers.dev";
+  });
+  const generated = generateConfigs(config, await baseConfigs());
+  assert.equal(
+    generated.probe!.vars!.BASE_URL, "https://acme-cloudflare-os.acme.workers.dev/gatekeeper/probe");
+});
+
+test("builds an enabled studio gate from this workspace, uncached, before the frontend", () => {
+  const commands = buildCommands(withProbe()).map(({ args }) => args);
+  const probe = commands.findIndex((args) => args.includes("@veer/gate-probe"));
+  assert.ok(probe >= 0, commands.join("\n"));
+  assert.deepEqual(commands[probe], ["exec", "vp", "run", "-F", "@veer/gate-probe", "--no-cache", "build"]);
+  const frontend = commands.findIndex((args) => args.includes("@gadgets/workshop-frontend"));
+  assert.ok(probe < frontend, commands.join("\n"));
+});
+
+test("validates the probe block like the vendor Gatekeepers'", () => {
+  assert.throws(
+    () => validateConfig(variant((c) => { delete c.probe; })),
+    /Missing required deployment value: probe\.enabled/);
+  assert.throws(
+    () => validateConfig(variant((c) => { c.probe = { enabled: "yes" }; })),
+    /probe\.enabled must be a boolean/);
+  assert.throws(
+    () => validateConfig(variant((c) => { c.probe = { enabled: true }; delete c.workers.probe; })),
+    /workers\.probe\.name/);
+  assert.throws(
+    () => validateConfig(variant((c) => {
+      c.probe = { enabled: true };
+      c.workers.probe.name = c.workers.scheduler.name;
+    })),
+    /unique/i);
+  // Disabled: an unset or placeholder name is fine, and it is not counted for uniqueness.
+  assert.doesNotThrow(() => validateConfig(variant((c) => { delete c.workers.probe; })));
+  assert.doesNotThrow(() => validateConfig(variant((c) => { c.workers.probe = { name: "<PROBE_WORKER>" }; })));
+  assert.doesNotThrow(() => validateConfig(variant((c) => {
+    c.workers.probe.name = c.workers.scheduler.name;
+  })));
 });

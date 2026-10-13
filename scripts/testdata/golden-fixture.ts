@@ -112,7 +112,7 @@ export const goldenBases: BaseConfigs = {
   },
 };
 
-const common = {
+const common = (): Pick<DeploymentConfig, "accountId" | "access" | "observability"> => ({
   accountId: "0123456789abcdef0123456789abcdef",
   access: {
     issuer: "https://acme.cloudflareaccess.com",
@@ -125,7 +125,7 @@ const common = {
     logs: { invocationLogs: false },
     traces: { enabled: true, headSamplingRate: 0.25 },
   },
-} as const;
+});
 
 const workers = {
   router: { name: "acme-os", route: { customDomain: "os.example.com" } },
@@ -146,7 +146,7 @@ const workers = {
  */
 export const goldenDeployments: Record<string, DeploymentConfig> = {
   everythingOn: {
-    ...common,
+    ...common(),
     publicBaseUrl: null,
     workers: structuredClone(workers),
     aiGateway: {
@@ -171,10 +171,10 @@ export const goldenDeployments: Record<string, DeploymentConfig> = {
       blueprintContentBucket: "acme-blueprints",
     },
     probe: { enabled: false },
-  } as DeploymentConfig,
+  },
 
   minimal: {
-    ...common,
+    ...common(),
     publicBaseUrl: "https://acme-os.acme.workers.dev",
     workers: {
       router: { name: "acme-os", route: { workersDev: true } },
@@ -195,10 +195,10 @@ export const goldenDeployments: Record<string, DeploymentConfig> = {
       blueprintContentBucket: null,
     },
     probe: { enabled: false },
-  } as DeploymentConfig,
+  },
 
   likeThisDeployment: {
-    ...common,
+    ...common(),
     publicBaseUrl: null,
     workers: structuredClone(workers),
     aiGateway: {
@@ -223,5 +223,5 @@ export const goldenDeployments: Record<string, DeploymentConfig> = {
       blueprintContentBucket: "acme-blueprints",
     },
     probe: { enabled: false },
-  } as DeploymentConfig,
+  },
 };

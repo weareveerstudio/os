@@ -29,6 +29,7 @@ const packageDirs = {
   email: "cloudflare-os/packages/gatekeeper-email",
   customGatekeeper: "packages/custom-gatekeeper",
   errorReporter: "packages/error-reporter",
+  probe: "packages/gate-probe",
 } as const;
 const generatedPaths = Object.fromEntries(
   Object.entries(packageDirs).map(([name, dir]) => [name, join(root, dir, generatedName)]),
@@ -57,6 +58,29 @@ function enabledVendorGatekeepers(config: DeploymentConfig): VendorGatekeeper[] 
 }
 
 /**
+ * The studio gates: Gatekeepers whose package lives in this repository (`packages/gate-<key>`) rather
+ * than in the submodule. Each is configured like a vendor Gatekeeper -- an `enabled` flag, a Worker
+ * name, and a `BASE_URL` derived from the public origin -- and bound the same way: bare on the router,
+ * as `GatekeeperVendor` with no props on the Workshop. Each is built with one
+ * `vp run --no-cache build` of `pkg` in this workspace, whose `dependsOn` rebuilds the app from source,
+ * and deployed after the custom Gatekeeper, before the Workshop. Compatibility flags and migrations
+ * come from the package's own `wrangler.jsonc`.
+ *
+ * Appended after every existing binding and build step, so with every studio gate off the generated
+ * configs of the other Workers are byte-identical to what they were before the table existed
+ * (`scripts/testdata/generated-golden.json` holds that output).
+ */
+const studioGates = [
+  { key: "probe", binding: "GATEKEEPER_PROBE", pkg: "@veer/gate-probe" },
+] as const;
+
+type StudioGate = (typeof studioGates)[number];
+
+function enabledStudioGates(config: DeploymentConfig): StudioGate[] {
+  return studioGates.filter(({ key }) => config[key].enabled);
+}
+
+/**
  * The router's path for a Gatekeeper binding: `/gatekeeper/<short>`, where `<short>` is the binding
  * name minus its prefix, lowercased -- GATEKEEPER_MCP -> mcp. Derived rather than tabulated, so it
  * cannot disagree with the router, which applies the same rule to whatever it finds bound.
@@ -81,6 +105,7 @@ const requiredPaths = [
   "errorReporting.enabled",
   ...vendorGatekeepers.map(({ key }) => `${key}.enabled`),
   "customGatekeeper.enabled",
+  ...studioGates.map(({ key }) => `${key}.enabled`),
   "observability.enabled",
   "observability.headSamplingRate",
   "observability.logs.invocationLogs",
@@ -209,6 +234,7 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
     ...vendorGatekeepers.flatMap(({ key }) =>
       config[key]?.enabled ? [`workers.${key}.name`] : []),
     ...(config.customGatekeeper?.enabled ? customGatekeeperPaths : []),
+    ...studioGates.flatMap(({ key }) => config[key]?.enabled ? [`workers.${key}.name`] : []),
   ];
   for (const path of activePaths) {
     const value = valueAt(config, path);
@@ -253,6 +279,15 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
       customGatekeeper: { enabled: false },
     };
   }
+  for (const { key } of studioGates) {
+    if (!config[key].enabled) {
+      activeConfig = {
+        ...activeConfig,
+        workers: { ...activeConfig.workers, [key]: undefined },
+        [key]: { enabled: false },
+      };
+    }
+  }
   const placeholder = JSON.stringify(activeConfig).match(/<[^>]+>/)?.[0];
   if (placeholder) throw new Error(`Replace deployment placeholder ${placeholder}.`);
 
@@ -263,6 +298,7 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
     "errorReporting.enabled",
     ...vendorGatekeepers.map(({ key }) => `${key}.enabled`),
     "customGatekeeper.enabled",
+    ...studioGates.map(({ key }) => `${key}.enabled`),
     "observability.enabled",
     "observability.headSamplingRate",
     "observability.logs.invocationLogs",
@@ -284,6 +320,7 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
     errorReporter: config.errorReporting.enabled,
     ...Object.fromEntries(vendorGatekeepers.map(({ key }) => [key, config[key].enabled])),
     customGatekeeper: config.customGatekeeper.enabled,
+    ...Object.fromEntries(studioGates.map(({ key }) => [key, config[key].enabled])),
   };
   const workerNames = Object.entries(config.workers)
     .filter(([key]) => enabledWorkers[key] ?? true)
@@ -291,7 +328,7 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
   if (new Set(workerNames).size !== workerNames.length) {
     throw new Error(
       "Every deployed Worker name must be unique: Router, Workshop, Context, Scheduler, and each " +
-      "enabled Gatekeeper and Reporter.");
+      "enabled Gatekeeper, studio gate and Reporter.");
   }
   if (!workerNames.every((name) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name))) {
     throw new Error("Worker names must use lowercase letters, numbers, and hyphens.");
@@ -348,6 +385,11 @@ export function validateConfig(config: DeploymentConfig): DeploymentConfig {
   }
   if (typeof config.customGatekeeper?.enabled !== "boolean") {
     throw new Error("customGatekeeper.enabled must be a boolean.");
+  }
+  for (const { key } of studioGates) {
+    if (typeof config[key]?.enabled !== "boolean") {
+      throw new Error(`${key}.enabled must be a boolean.`);
+    }
   }
   const release = config.errorReporting.release;
   if (release !== null && release !== undefined &&
@@ -517,6 +559,7 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
   const context = structuredClone(bases.context);
   const scheduler = structuredClone(bases.scheduler);
   const vendors = enabledVendorGatekeepers(config);
+  const gates = enabledStudioGates(config);
   const customGatekeeper = config.customGatekeeper.enabled
     ? structuredClone(bases.customGatekeeper)
     : undefined;
@@ -536,6 +579,7 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
     ...(config.customGatekeeper.enabled
       ? [{ binding: "GATEKEEPER_CUSTOM", service: config.workers.customGatekeeper!.name }]
       : []),
+    ...gates.map(({ key, binding }) => ({ binding, service: config.workers[key]!.name })),
   ];
 
   setCommon(workshop, config, config.workers.workshop.name);
@@ -609,6 +653,13 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
       service: config.workers.customGatekeeper!.name,
       entrypoint: "GatekeeperVendor",
     }] : []),
+    // No props, like the vendor Gatekeepers: a studio gate keeps its accounts and its studio-wide
+    // stores in its own Durable Objects, reached through `ctx.exports`.
+    ...gates.map(({ key, binding }) => ({
+      binding,
+      service: config.workers[key]!.name,
+      entrypoint: "GatekeeperVendor",
+    })),
   ];
   workshop.kv_namespaces = [
     { binding: "BLUEPRINTS", ...(config.resources.blueprintsKvNamespaceId
@@ -671,11 +722,21 @@ export function generateConfigs(config: DeploymentConfig, bases: BaseConfigs): G
     setCommon(errorReporter, config, config.workers.errorReporter!.name);
   }
 
+  const gateConfigs: Partial<Record<StudioGate["key"], ProdWranglerConfig>> = {};
+  for (const { key, binding } of gates) {
+    const gate = structuredClone(bases[key]);
+    setCommon(gate, config, config.workers[key]!.name);
+    // The same derivation as the vendor Gatekeepers': the router serves the gate at this path.
+    gate.vars = { ...gate.vars, BASE_URL: `${origin}${gatekeeperPath(binding)}` };
+    gateConfigs[key] = gate;
+  }
+
   return {
     router, workshop, context, scheduler,
     ...vendorConfigs,
     ...(customGatekeeper && { customGatekeeper }),
     ...(errorReporter && { errorReporter }),
+    ...gateConfigs,
   };
 }
 
@@ -728,6 +789,9 @@ export function buildCommands(config: DeploymentConfig): BuildCommand[] {
     ...enabledVendorGatekeepers(config).map(({ pkg }) => ({ args: submoduleBuild(pkg) })),
     ...(config.customGatekeeper.enabled ? [{ args: ownBuild("custom-gatekeeper") }] : []),
     ...(config.errorReporting.enabled ? [{ args: ownBuild("error-reporter") }] : []),
+    // A task with `dependsOn: ["build:app"]`, like the vendor Gatekeepers' builds, so `--no-cache`
+    // reaches the app build too: the deploy ships an app built from source, never a replay.
+    ...enabledStudioGates(config).map(({ pkg }) => ({ args: ownBuild(pkg) })),
     // Access mode is a build-time constant in the frontend bundle (`src/useAuth.ts`), so it is set
     // here rather than inherited: a bundle built under a different value is wrong, not just stale.
     { args: submoduleBuild("@gadgets/workshop-frontend"), env: { VITE_CF_ACCESS_MODE: "true" } },
@@ -863,6 +927,7 @@ async function main(): Promise<void> {
     email: await readJsonc(join(root, packageDirs.email, "wrangler.jsonc")),
     customGatekeeper: await readJsonc(join(root, packageDirs.customGatekeeper, "wrangler.jsonc")),
     errorReporter: await readJsonc(join(root, packageDirs.errorReporter, "wrangler.jsonc")),
+    probe: await readJsonc(join(root, packageDirs.probe, "wrangler.jsonc")),
   });
   reportAiGateway(config);
 
@@ -886,6 +951,9 @@ async function main(): Promise<void> {
     }
     if (config.customGatekeeper.enabled) {
       deployWorker(packageDirs.customGatekeeper, deployArgs);
+    }
+    for (const { key } of enabledStudioGates(config)) {
+      deployWorker(packageDirs[key], deployArgs);
     }
     deployWorker(packageDirs.workshop, deployArgs);
     // Last: it binds every one of the above.

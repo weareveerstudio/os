@@ -80,6 +80,12 @@ export interface ContextConfig {
   artifacts?: { enabled?: boolean; namespace?: string };
 }
 
+/** A studio gate's `deployment.jsonc` block. */
+export interface StudioGateConfig {
+  /** Off: nothing is built, deployed or bound, and every other Worker's config is unchanged. */
+  enabled: boolean;
+}
+
 /** Worker telemetry. Maps onto wrangler's `observability` block. */
 export interface DeploymentObservabilityConfig {
   enabled: boolean;
@@ -121,6 +127,8 @@ export interface DeploymentConfig {
     customGatekeeper?: { name: string };
     /** Only required when `errorReporting.enabled`. */
     errorReporter?: { name: string };
+    /** Only required when `probe.enabled`. */
+    probe?: { name: string };
   };
   access: AccessConfig;
   aiGateway: AiGatewayConfigInput;
@@ -144,6 +152,12 @@ export interface DeploymentConfig {
   email: { enabled: boolean };
   /** Display text the example custom Gatekeeper serves to agents. */
   customGatekeeper: { enabled: boolean; name?: string; message?: string };
+  /**
+   * The Foundation probe, a studio gate: a Gatekeeper whose package lives in this repository
+   * (`packages/gate-probe`). Like the vendor Gatekeepers, its Worker name is the whole of its
+   * deploy-time configuration.
+   */
+  probe: StudioGateConfig;
   /** Private explicit-issue destination. */
   errorReporting: { enabled: boolean; environment?: string; release?: string | null };
   /** Workshop KV/R2. `null` requests Wrangler automatic provisioning. */
@@ -215,6 +229,8 @@ export interface GeneratedConfigs {
   customGatekeeper?: ProdWranglerConfig;
   /** Absent when `errorReporting.enabled` is false. */
   errorReporter?: ProdWranglerConfig;
+  /** Absent when `probe.enabled` is false. */
+  probe?: ProdWranglerConfig;
 }
 
 /** The upstream base configs the generated ones are derived from. */
@@ -228,6 +244,7 @@ export interface BaseConfigs {
   email: ProdWranglerConfig;
   customGatekeeper: ProdWranglerConfig;
   errorReporter: ProdWranglerConfig;
+  probe: ProdWranglerConfig;
 }
 
 /** One build step `deploy.ts` runs before deploying. See `buildCommands`. */

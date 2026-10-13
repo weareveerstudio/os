@@ -8,6 +8,7 @@
     "./account-state": "./src/account-state.ts",
     "./actions": "./src/actions.ts",
     "./audit-log": "./src/audit-log.ts",
+    "./audit-types": "./src/audit-types.ts",
     "./describe": "./src/describe.ts",
     "./guards": "./src/guards.ts",
     "./observers": "./src/observers.ts",
@@ -15,6 +16,7 @@
     "./stores": "./src/stores.ts",
     "./testing": "./src/testing.ts",
     "./app": "./app/index.tsx",
+    "./app/ui-client": "./app/ui-client.ts",
     "./app/styles.css": "./app/styles.css",
     "./app-build": "./build/app-build.ts"
   },

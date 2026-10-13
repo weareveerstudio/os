@@ -1,0 +1,28 @@
+// Base config for veeros-gk-probe. scripts/deploy.ts derives the deployed config from this file:
+// it sets the name, account, observability and `BASE_URL`, and turns workers.dev and preview URLs
+// off. Durable Object migrations are append-only: add a tag, never edit a shipped one.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "gate-probe",
+  "main": ".wrangler/validate/src/worker.ts",
+  "build": {
+    "command": "pnpm exec capnweb-validate build --out .wrangler/validate",
+    "watch_dir": "src"
+  },
+  "compatibility_date": "2026-09-04",
+  // allow_irrevocable_stub_storage: studio gates may persist verifier stubs (Finance's tracked
+  // observers do). nodejs_als: gatekeeper-kit's logger runs on AsyncLocalStorage.
+  "compatibility_flags": ["allow_irrevocable_stub_storage", "nodejs_als"],
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": false }],
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["StudioAccountState", "ProbeNotesStore", "ProbeGatekeeper"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": false }
+  }
+}

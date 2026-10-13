@@ -10,34 +10,10 @@
  * aborts. Only `deleteAll()` on the whole Durable Object can remove rows.
  */
 
+import type { AuditActor, AuditDetail, AuditEntry, AuditPage } from "./audit-types.js";
 import type { MigrationStep } from "./sql.js";
 
-/** Who made a change. People are named by the display name they set on their own account. */
-export type AuditActor =
-  | { kind: "person"; accountId: string; name: string; isAdmin: boolean }
-  | { kind: "agent"; accountId: string; workspaceId: string };
-
-/** One recorded change. */
-export type AuditEntry = {
-  /** Monotonic position in the log; never reused. */
-  seq: number;
-  /** Milliseconds since the epoch. */
-  at: number;
-  actor: AuditActor;
-  /** Dotted verb such as `note.add`. */
-  action: string;
-  /** The id of the record changed, when there is one. */
-  target: string | null;
-  /** JSON-serializable detail, at most {@link MAX_AUDIT_DETAIL_BYTES} once serialized. */
-  detail: unknown;
-};
-
-/** One page of the log, newest first. */
-export type AuditPage = {
-  entries: AuditEntry[];
-  /** Pass as `before` to read the next (older) page; absent on the last page. */
-  nextBefore?: number;
-};
+export type { AuditActor, AuditDetail, AuditEntry, AuditPage } from "./audit-types.js";
 
 export const MAX_AUDIT_DETAIL_BYTES = 16 * 1024;
 export const MAX_AUDIT_PAGE = 200;
@@ -101,7 +77,7 @@ export class AuditLog {
    * @param input The actor, a dotted action, and optional target and detail.
    * @returns The stored entry.
    */
-  append(input: { actor: AuditActor; action: string; target?: string | null; detail?: unknown }):
+  append(input: { actor: AuditActor; action: string; target?: string | null; detail?: AuditDetail }):
       AuditEntry {
     if (!ACTION_PATTERN.test(input.action)) {
       throw new Error(`Audit action "${input.action}" must be a dotted lowercase verb like note.add.`);
@@ -128,7 +104,7 @@ export class AuditLog {
       detail,
     ).one().seq;
     return { seq, at, actor: structuredClone(actor), action: input.action, target,
-      detail: detail === null ? null : JSON.parse(detail) };
+      detail: detail === null ? null : JSON.parse(detail) as AuditDetail };
   }
 
   /**
@@ -168,6 +144,6 @@ function toEntry(row: Row): AuditEntry {
     actor,
     action: row.action,
     target: row.target,
-    detail: row.detail === null ? null : JSON.parse(row.detail),
+    detail: row.detail === null ? null : JSON.parse(row.detail) as AuditDetail,
   };
 }

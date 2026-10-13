@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { STUDIO_APP_CSP, studioAppConfig } from "../../build/app-build.ts";
+import { STUDIO_APP_CSP, assertCspApplied, studioAppConfig } from "../../build/app-build.ts";
 import { TOKENS_FILE, WORKSHOP_STYLES, renderTokens } from "../../build/tokens.ts";
 
 describe("Kumo token overrides", () => {
@@ -46,6 +46,14 @@ describe("studio app build", () => {
     expect(names).toEqual(expect.arrayContaining([
       "vite:singlefile", "studio-head", "studio-emit-app-text",
     ]));
+  });
+
+  it("refuses a page whose CSP ended up inside a comment", () => {
+    const meta = `<meta http-equiv="Content-Security-Policy" content="${
+      STUDIO_APP_CSP.replaceAll("'", "&#39;")}">`;
+    expect(() => assertCspApplied(`<html><head>${meta}</head></html>`)).not.toThrow();
+    expect(() => assertCspApplied(`<!-- <head>${meta} --><html><head></head></html>`))
+      .toThrow(/no live Content-Security-Policy/);
   });
 
   it("refuses an invalid gate key", () => {

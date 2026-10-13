@@ -89,6 +89,18 @@ function studioHead(title: string): Plugin {
   };
 }
 
+/**
+ * Throws unless the page's live markup (outside comments) carries the CSP. Vite places injected
+ * tags by matching `<head>` textually, so a comment mentioning it would swallow them.
+ * @param html The built page.
+ */
+export function assertCspApplied(html: string): void {
+  const live = html.replace(/<!--[\s\S]*?-->/g, "");
+  if (!/<meta http-equiv="Content-Security-Policy" content="[^"]*connect-src &#39;none&#39;/.test(live)) {
+    throw new Error("The built app page has no live Content-Security-Policy meta tag.");
+  }
+}
+
 /** Copies the built page to `src/generated/app.txt`, skipping the write when nothing changed. */
 function emitAppText(packageDirectory: string, gate: string): Plugin {
   return {
@@ -99,11 +111,35 @@ function emitAppText(packageDirectory: string, gate: string): Plugin {
         /(<script type="module"[^>]*>)([\s\S]*?)(<\/script>)/,
         `$1$2\n//# sourceURL=app:///gatekeeper/${gate}/${gate}-app.js\n$3`,
       );
+      assertCspApplied(html);
       const output = resolve(packageDirectory, "src", "generated", "app.txt");
       const contents = `<!-- Generated from packages/gate-${gate}/app. Do not edit. -->\n${html}`;
       if (existsSync(output) && readFileSync(output, "utf8") === contents) return;
       mkdirSync(dirname(output), { recursive: true });
       writeFileSync(output, contents);
+    },
+  };
+}
+
+/**
+ * Loads `*.txt` imports as strings, the way wrangler's Text-module rule does at deploy. For a gate's
+ * vitest config: under Vite a `.txt` import would otherwise resolve to an asset URL.
+ * @returns A Vite plugin.
+ */
+export function textModules(): Plugin {
+  // Resolved here rather than left to Vite, which follows symlinks: `types.txt -> types.d.ts`
+  // would otherwise load as an empty declaration module.
+  const prefix = "\0studio-text:";
+  return {
+    name: "studio-text-modules",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (!source.endsWith(".txt") || !importer) return null;
+      return prefix + resolve(dirname(importer.split("?")[0]), source);
+    },
+    load(id) {
+      if (!id.startsWith(prefix)) return null;
+      return `export default ${JSON.stringify(readFileSync(id.slice(prefix.length), "utf8"))};`;
     },
   };
 }

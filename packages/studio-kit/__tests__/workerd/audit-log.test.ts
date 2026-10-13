@@ -58,7 +58,7 @@ describe("AuditLog", () => {
       expect(() => log.append({ actor: person, action: "Add Note" })).toThrow(/dotted lowercase/);
       expect(() => log.append({ actor: person, action: "add" })).toThrow(/dotted lowercase/);
       expect(() => log.append({
-        actor: person, action: "note.add", detail: "x".repeat(MAX_AUDIT_DETAIL_BYTES),
+        actor: person, action: "note.add", detail: { body: "x".repeat(MAX_AUDIT_DETAIL_BYTES) },
       })).toThrow(/exceeds/);
       expect(() => log.list({ limit: 0 })).toThrow(/page size/);
       expect(() => log.list({ before: -1 })).toThrow(/cursor/);

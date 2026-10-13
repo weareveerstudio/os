@@ -65,6 +65,16 @@ export type FacetSpec = {
   name?: string;
 };
 
+/**
+ * The git cache the Overseer hands `applyAction`. Studio gates never touch git, but the argument is
+ * part of the `Gatekeeper` contract that `@validateRpc()` checks.
+ */
+class NoGitCache extends RpcTarget {
+  async advertiseCommit(): Promise<never> {
+    throw new Error("Studio gates have no git cache.");
+  }
+}
+
 type HostedGatekeeper = {
   describe(): Promise<ResourceDescription>;
   getTypeScriptTypes(): Promise<string>;
@@ -73,7 +83,7 @@ type HostedGatekeeper = {
   getAgentCatalog?(): Promise<AgentCatalog | null>;
   addObserver(id: string, user: Fetcher<GatekeeperUserVerifier>): Promise<void>;
   removeObserver(id: string): Promise<void>;
-  applyAction(action: number): Promise<void>;
+  applyAction(action: number, cache: NoGitCache): Promise<void>;
   rejectAction(action: number): Promise<void | { restart?: boolean }>;
   revertAction(action: number): Promise<unknown>;
 };
@@ -129,7 +139,7 @@ export class StudioFacetHost extends DurableObject {
   }
 
   applyAction(spec: FacetSpec, action: number) {
-    return this.#facet(spec).applyAction(action);
+    return this.#facet(spec).applyAction(action, new NoGitCache());
   }
 
   rejectAction(spec: FacetSpec, action: number) {

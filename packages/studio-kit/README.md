@@ -22,6 +22,7 @@ Everything here is either a plain helper or a Durable Object reached through the
 | `./observers` | `observation()` descriptions, `BASELINE`, the kit's gate and strategies |
 | `./guards` | `requireAdmin`, `requireText`, `requireId` |
 | `./testing` | `FakeApprovalQueue`, `StudioFacetHost`, `rejectionMessage` for workerd suites |
+| `./app/ui-client` | `FlatUi`, `UiClient`, `errorMessage` (no DOM, so a Worker can import it) |
 | `./app` | `mountStudioApp`, `usePolled`, `useMutation`, `FlatUi`, `UiClient`, `errorMessage` |
 | `./app/styles.css` | Kumo styles, Tailwind, and the Workshop's token overrides |
 | `./app-build` | `buildStudioApp`: one inlined HTML file with the frame's CSP, emitted as `src/generated/app.txt` |

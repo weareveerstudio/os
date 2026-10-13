@@ -7,6 +7,11 @@ packages:
   # that package is THIS one. Without this entry `pnpm install` fails with
   # ERR_PNPM_WORKSPACE_PKG_NOT_FOUND.
   - cloudflare-os/scripts
+  # Studio gates build on gatekeeper-kit (actions, simulation, action descriptions, observers),
+  # which imports the logger from `observability`. Both are TypeScript-source libraries with no
+  # build output, consumed through their `exports` maps. See docs/studio-os/architecture.md.
+  - cloudflare-os/packages/gatekeeper-kit
+  - cloudflare-os/packages/observability
   - packages/*
 
 # Mirror of cloudflare-os/pnpm-workspace.yaml's catalog. Required, not merely tidy: the two
@@ -24,6 +29,8 @@ catalog:
   '@cloudflare/vitest-pool-workers': ^0.22.0
   '@cloudflare/workers-types': ^5.20261001.1
   capnweb: ^0.12.0
+  # Declared as `catalog:` by gatekeeper-kit (its git-diff module).
+  diff: ^8.0.4
   # Exact: pinned in lockstep with capnweb (declared as a >=0.7.0 peer)
   capnweb-validate: 0.3.0
   # Exact: a prerelease, kept in step with the Wrangler/workerd stack the test pool runs on.

@@ -1,0 +1,14 @@
+// Type-checks the Worker-side library and its workerd tests. `build` runs this, the app config and
+// the node config; nothing is emitted (the root sets `noEmit`), since consumers import the sources.
+{
+  "extends": "../../cloudflare-os/tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types/experimental", "@cloudflare/vitest-pool-workers/types"]
+  },
+  "include": ["src", "__tests__/workerd"],
+  "exclude": ["node_modules", ".wrangler"]
+}

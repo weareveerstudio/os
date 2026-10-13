@@ -1,0 +1,14 @@
+// The build helpers and config files, which run under Node.
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "checkJs": false
+  },
+  "include": ["build", "__tests__/node", "*.config.ts"]
+}

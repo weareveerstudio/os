@@ -1,0 +1,33 @@
+{
+  "name": "@veer/gate-probe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Foundation's proving gate (veeros-gk-probe): a shared notes store with a sidebar app and an agent session.",
+  "type": "module",
+  "main": "./src/worker.ts",
+  "dependencies": {
+    "@gadgets/gatekeeper-kit": "workspace:*",
+    "@gadgets/workshop-shared": "workspace:*",
+    "@veer/studio-kit": "workspace:*",
+    "capnweb": "catalog:",
+    "capnweb-validate": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/kumo": "^2.14.0",
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@gadgets/scripts": "workspace:*",
+    "@phosphor-icons/react": "^2.1.10",
+    "@types/node": "26.1.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^26.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

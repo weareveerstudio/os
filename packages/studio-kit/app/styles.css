@@ -1,0 +1,36 @@
+/*
+ * Base stylesheet for every studio gate's app. A gate's app imports it once:
+ *   import "@veer/studio-kit/app/styles.css";
+ *
+ * Kumo's component styles and Tailwind are compiled into the gate's single HTML file at build time.
+ * `@source` paths resolve from this file: Kumo's components and the shell's own markup. The gate's
+ * own `app/` is scanned automatically, since it is the build's working directory.
+ */
+@source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@source "./**/*.{ts,tsx}";
+@import "@cloudflare/kumo/styles";
+@import "tailwindcss";
+@import "./tokens.css";
+@custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-kumo-base);
+  color: var(--text-color-kumo-default);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tailwind v4 no longer sets cursor:pointer on buttons. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary,
+label[for] {
+  cursor: pointer;
+}

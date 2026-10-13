@@ -1,0 +1,878 @@
+{
+  "everythingOn": {
+    "router": {
+      "name": "acme-os",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "assets": {
+        "binding": "ASSETS",
+        "directory": "../workshop-frontend/dist",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": [
+          "/api/*",
+          "/gatekeeper/*"
+        ]
+      },
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "os.example.com",
+          "custom_domain": true
+        }
+      ],
+      "preview_urls": false,
+      "services": [
+        {
+          "binding": "WORKSHOP_BACKEND",
+          "service": "acme-os-backend"
+        },
+        {
+          "binding": "GATEKEEPER_CONTEXT",
+          "service": "acme-os-context"
+        },
+        {
+          "binding": "GATEKEEPER_SCHEDULER",
+          "service": "acme-os-scheduler"
+        },
+        {
+          "binding": "GATEKEEPER_MCP",
+          "service": "acme-os-mcp"
+        },
+        {
+          "binding": "GATEKEEPER_GITHUB",
+          "service": "acme-os-github"
+        },
+        {
+          "binding": "GATEKEEPER_EMAIL",
+          "service": "acme-os-email"
+        },
+        {
+          "binding": "GATEKEEPER_CUSTOM",
+          "service": "acme-os-custom"
+        }
+      ]
+    },
+    "workshop": {
+      "name": "acme-os-backend",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "compatibility_flags": [
+        "nodejs_compat"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "vars": {
+        "ADMINS": [
+          "admin@example.com",
+          "partner@example.com"
+        ],
+        "CF_ACCESS_ISS": "https://acme.cloudflareaccess.com",
+        "CF_ACCESS_AUD": "access-audience",
+        "PUBLIC_BASE_URL": "https://os.example.com",
+        "CF_AI_GATEWAY": "acme-ai",
+        "CF_AI_GATEWAY_ACCOUNT_ID": "fedcba9876543210fedcba9876543210",
+        "CF_AI_GATEWAY_PROVIDERS": "anthropic,google,cloudflare",
+        "CF_AI_GATEWAY_USE_BINDING": "false"
+      },
+      "secrets": {
+        "required": [
+          "SOMETHING_UPSTREAM",
+          "CF_AI_GATEWAY_API_TOKEN"
+        ]
+      },
+      "services": [
+        {
+          "binding": "ERROR_REPORTER",
+          "service": "acme-os-errors",
+          "entrypoint": "ErrorReporter",
+          "props": {
+            "service": "acme-os-backend",
+            "environment": "production",
+            "release": "abc123"
+          }
+        },
+        {
+          "binding": "GATEKEEPER_CONTEXT",
+          "service": "acme-os-context",
+          "entrypoint": "GatekeeperVendor",
+          "props": {
+            "sharingDomain": "https://legacy.example.com"
+          }
+        },
+        {
+          "binding": "GATEKEEPER_SCHEDULER",
+          "service": "acme-os-scheduler",
+          "entrypoint": "GatekeeperVendor"
+        },
+        {
+          "binding": "GATEKEEPER_MCP",
+          "service": "acme-os-mcp",
+          "entrypoint": "GatekeeperVendor"
+        },
+        {
+          "binding": "GATEKEEPER_GITHUB",
+          "service": "acme-os-github",
+          "entrypoint": "GatekeeperVendor"
+        },
+        {
+          "binding": "GATEKEEPER_EMAIL",
+          "service": "acme-os-email",
+          "entrypoint": "GatekeeperVendor"
+        },
+        {
+          "binding": "GATEKEEPER_CUSTOM",
+          "service": "acme-os-custom",
+          "entrypoint": "GatekeeperVendor"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "BLUEPRINTS",
+          "id": "blueprints-kv-id"
+        },
+        {
+          "binding": "AVATARS",
+          "id": "avatars-kv-id"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "BLUEPRINT_CONTENT",
+          "bucket_name": "acme-blueprints"
+        }
+      ],
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "Overseer",
+            "User"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false,
+      "ai": {
+        "binding": "WORKERS_AI"
+      }
+    },
+    "context": {
+      "name": "acme-os-context",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "kv_namespaces": [
+        {
+          "binding": "CONTEXT_COLLECTIONS",
+          "id": "context-kv-id"
+        }
+      ],
+      "artifacts": [
+        {
+          "binding": "ARTIFACTS",
+          "namespace": "acme-context-collections"
+        }
+      ],
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "ContextLibrary"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "scheduler": {
+      "name": "acme-os-scheduler",
+      "main": ".wrangler/validate/src/worker.ts",
+      "compatibility_date": "2026-09-04",
+      "compatibility_flags": [
+        "allow_irrevocable_stub_storage",
+        "nodejs_als"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "ScheduleDriver",
+            "SchedulerGatekeeper"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "mcp": {
+      "name": "acme-os-mcp",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "vars": {
+        "MCP_ALLOW_INSECURE": "false",
+        "BASE_URL": "https://os.example.com/gatekeeper/mcp"
+      },
+      "migrations": [
+        {
+          "tag": "v0",
+          "new_sqlite_classes": [
+            "McpAccount"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "github": {
+      "name": "acme-os-github",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "migrations": [
+        {
+          "tag": "v0",
+          "new_sqlite_classes": [
+            "UserAccount",
+            "GitHubGatekeeperImpl"
+          ]
+        },
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "GitHubHookDriver"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false,
+      "vars": {
+        "BASE_URL": "https://os.example.com/gatekeeper/github"
+      }
+    },
+    "email": {
+      "name": "acme-os-email",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "migrations": [
+        {
+          "tag": "v0",
+          "new_sqlite_classes": [
+            "UserAccount"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false,
+      "vars": {
+        "BASE_URL": "https://os.example.com/gatekeeper/email"
+      }
+    },
+    "customGatekeeper": {
+      "name": "acme-os-custom",
+      "main": ".wrangler/validate/src/index.ts",
+      "compatibility_date": "2026-08-04",
+      "compatibility_flags": [
+        "allow_irrevocable_stub_storage",
+        "nodejs_compat"
+      ],
+      "vars": {
+        "CUSTOM_NAME": "Acme",
+        "CUSTOM_MESSAGE": "Use the company handbook."
+      },
+      "migrations": [
+        {
+          "tag": "v0",
+          "new_sqlite_classes": [
+            "CustomGatekeeper"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false,
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      }
+    },
+    "errorReporter": {
+      "name": "acme-os-errors",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-08-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    }
+  },
+  "minimal": {
+    "router": {
+      "name": "acme-os",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "assets": {
+        "binding": "ASSETS",
+        "directory": "../workshop-frontend/dist",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": [
+          "/api/*",
+          "/gatekeeper/*"
+        ]
+      },
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": true,
+      "preview_urls": false,
+      "services": [
+        {
+          "binding": "WORKSHOP_BACKEND",
+          "service": "acme-os-backend"
+        },
+        {
+          "binding": "GATEKEEPER_CONTEXT",
+          "service": "acme-os-context"
+        },
+        {
+          "binding": "GATEKEEPER_SCHEDULER",
+          "service": "acme-os-scheduler"
+        }
+      ]
+    },
+    "workshop": {
+      "name": "acme-os-backend",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "compatibility_flags": [
+        "nodejs_compat"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "vars": {
+        "ADMINS": [
+          "admin@example.com",
+          "partner@example.com"
+        ],
+        "CF_ACCESS_ISS": "https://acme.cloudflareaccess.com",
+        "CF_ACCESS_AUD": "access-audience",
+        "PUBLIC_BASE_URL": "https://acme-os.acme.workers.dev"
+      },
+      "secrets": {
+        "required": [
+          "SOMETHING_UPSTREAM"
+        ]
+      },
+      "services": [
+        {
+          "binding": "GATEKEEPER_CONTEXT",
+          "service": "acme-os-context",
+          "entrypoint": "GatekeeperVendor",
+          "props": {
+            "sharingDomain": "https://acme-os.acme.workers.dev"
+          }
+        },
+        {
+          "binding": "GATEKEEPER_SCHEDULER",
+          "service": "acme-os-scheduler",
+          "entrypoint": "GatekeeperVendor"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "BLUEPRINTS"
+        },
+        {
+          "binding": "AVATARS"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "BLUEPRINT_CONTENT"
+        }
+      ],
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "Overseer",
+            "User"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false,
+      "ai": {
+        "binding": "WORKERS_AI"
+      }
+    },
+    "context": {
+      "name": "acme-os-context",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "kv_namespaces": [
+        {
+          "binding": "CONTEXT_COLLECTIONS"
+        }
+      ],
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "ContextLibrary"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "scheduler": {
+      "name": "acme-os-scheduler",
+      "main": ".wrangler/validate/src/worker.ts",
+      "compatibility_date": "2026-09-04",
+      "compatibility_flags": [
+        "allow_irrevocable_stub_storage",
+        "nodejs_als"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "ScheduleDriver",
+            "SchedulerGatekeeper"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    }
+  },
+  "likeThisDeployment": {
+    "router": {
+      "name": "acme-os",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "assets": {
+        "binding": "ASSETS",
+        "directory": "../workshop-frontend/dist",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": [
+          "/api/*",
+          "/gatekeeper/*"
+        ]
+      },
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "os.example.com",
+          "custom_domain": true
+        }
+      ],
+      "preview_urls": false,
+      "services": [
+        {
+          "binding": "WORKSHOP_BACKEND",
+          "service": "acme-os-backend"
+        },
+        {
+          "binding": "GATEKEEPER_CONTEXT",
+          "service": "acme-os-context"
+        },
+        {
+          "binding": "GATEKEEPER_SCHEDULER",
+          "service": "acme-os-scheduler"
+        },
+        {
+          "binding": "GATEKEEPER_MCP",
+          "service": "acme-os-mcp"
+        },
+        {
+          "binding": "GATEKEEPER_GITHUB",
+          "service": "acme-os-github"
+        }
+      ]
+    },
+    "workshop": {
+      "name": "acme-os-backend",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "compatibility_flags": [
+        "nodejs_compat"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "vars": {
+        "ADMINS": [
+          "admin@example.com",
+          "partner@example.com"
+        ],
+        "CF_ACCESS_ISS": "https://acme.cloudflareaccess.com",
+        "CF_ACCESS_AUD": "access-audience",
+        "PUBLIC_BASE_URL": "https://os.example.com",
+        "CF_AI_GATEWAY": "acme-ai",
+        "CF_AI_GATEWAY_ACCOUNT_ID": "0123456789abcdef0123456789abcdef",
+        "CF_AI_GATEWAY_PROVIDERS": "cloudflare,anthropic"
+      },
+      "secrets": {
+        "required": [
+          "SOMETHING_UPSTREAM"
+        ]
+      },
+      "services": [
+        {
+          "binding": "GATEKEEPER_CONTEXT",
+          "service": "acme-os-context",
+          "entrypoint": "GatekeeperVendor",
+          "props": {
+            "sharingDomain": "https://os.example.com"
+          }
+        },
+        {
+          "binding": "GATEKEEPER_SCHEDULER",
+          "service": "acme-os-scheduler",
+          "entrypoint": "GatekeeperVendor"
+        },
+        {
+          "binding": "GATEKEEPER_MCP",
+          "service": "acme-os-mcp",
+          "entrypoint": "GatekeeperVendor"
+        },
+        {
+          "binding": "GATEKEEPER_GITHUB",
+          "service": "acme-os-github",
+          "entrypoint": "GatekeeperVendor"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "BLUEPRINTS",
+          "id": "blueprints-kv-id"
+        },
+        {
+          "binding": "AVATARS",
+          "id": "avatars-kv-id"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "BLUEPRINT_CONTENT",
+          "bucket_name": "acme-blueprints"
+        }
+      ],
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "Overseer",
+            "User"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false,
+      "ai": {
+        "binding": "WORKERS_AI"
+      }
+    },
+    "context": {
+      "name": "acme-os-context",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "kv_namespaces": [
+        {
+          "binding": "CONTEXT_COLLECTIONS",
+          "id": "context-kv-id"
+        }
+      ],
+      "artifacts": [
+        {
+          "binding": "ARTIFACTS",
+          "namespace": "acme-context-collections"
+        }
+      ],
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "ContextLibrary"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "scheduler": {
+      "name": "acme-os-scheduler",
+      "main": ".wrangler/validate/src/worker.ts",
+      "compatibility_date": "2026-09-04",
+      "compatibility_flags": [
+        "allow_irrevocable_stub_storage",
+        "nodejs_als"
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "ScheduleDriver",
+            "SchedulerGatekeeper"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "mcp": {
+      "name": "acme-os-mcp",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "vars": {
+        "MCP_ALLOW_INSECURE": "false",
+        "BASE_URL": "https://os.example.com/gatekeeper/mcp"
+      },
+      "migrations": [
+        {
+          "tag": "v0",
+          "new_sqlite_classes": [
+            "McpAccount"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "github": {
+      "name": "acme-os-github",
+      "main": "src/index.ts",
+      "compatibility_date": "2026-09-04",
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 0.5,
+        "logs": {
+          "invocation_logs": false
+        },
+        "traces": {
+          "enabled": true,
+          "head_sampling_rate": 0.25
+        }
+      },
+      "migrations": [
+        {
+          "tag": "v0",
+          "new_sqlite_classes": [
+            "UserAccount",
+            "GitHubGatekeeperImpl"
+          ]
+        },
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "GitHubHookDriver"
+          ]
+        }
+      ],
+      "account_id": "0123456789abcdef0123456789abcdef",
+      "workers_dev": false,
+      "preview_urls": false,
+      "vars": {
+        "BASE_URL": "https://os.example.com/gatekeeper/github"
+      }
+    }
+  }
+}

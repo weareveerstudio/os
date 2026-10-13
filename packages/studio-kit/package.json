@@ -1,0 +1,51 @@
+{
+  "name": "@veer/studio-kit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared pieces for VEER Studio OS gates: app shell, account state, audit log, storage and wiring conventions. Not a deployable Worker.",
+  "type": "module",
+  "exports": {
+    "./account-state": "./src/account-state.ts",
+    "./actions": "./src/actions.ts",
+    "./audit-log": "./src/audit-log.ts",
+    "./describe": "./src/describe.ts",
+    "./guards": "./src/guards.ts",
+    "./observers": "./src/observers.ts",
+    "./sql": "./src/sql.ts",
+    "./stores": "./src/stores.ts",
+    "./testing": "./src/testing.ts",
+    "./app": "./app/index.tsx",
+    "./app/styles.css": "./app/styles.css",
+    "./app-build": "./build/app-build.ts"
+  },
+  "dependencies": {
+    "@gadgets/gatekeeper-kit": "workspace:*",
+    "@gadgets/workshop-shared": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "capnweb": "catalog:",
+    "tailwindcss": "^4.3.3",
+    "terser": "^5.51.2",
+    "vite": "catalog:",
+    "vite-plugin-singlefile": "^2.3.3"
+  },
+  "peerDependencies": {
+    "@cloudflare/kumo": "^2.14.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/kumo": "^2.14.0",
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@gadgets/scripts": "workspace:*",
+    "@types/node": "26.1.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "jsdom": "^26.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

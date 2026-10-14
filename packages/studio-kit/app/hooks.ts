@@ -70,12 +70,15 @@ export function usePolled<T>(
   return { data, error, loading, refresh };
 }
 
+/** How a write ended. Discriminated, so a `void` or falsy result is still a success. */
+export type MutationResult<T> = { ok: true; value: T } | { ok: false };
+
 /** A write in progress, and its failure. */
 export type Mutation = {
   pending: boolean;
   error: string | null;
-  /** Runs `write`, recording pending state and a failure message. Resolves undefined on failure. */
-  run<T>(write: () => Promise<T>): Promise<T | undefined>;
+  /** Runs `write`, recording pending state and, on failure, a message to show. */
+  run<T>(write: () => Promise<T>): Promise<MutationResult<T>>;
   clearError(): void;
 };
 
@@ -86,14 +89,14 @@ export type Mutation = {
 export function useMutation(): Mutation {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = useCallback(async <T,>(write: () => Promise<T>): Promise<T | undefined> => {
+  const run = useCallback(async <T,>(write: () => Promise<T>): Promise<MutationResult<T>> => {
     setPending(true);
     setError(null);
     try {
-      return await write();
+      return { ok: true, value: await write() };
     } catch (caught) {
       setError(errorMessage(caught));
-      return undefined;
+      return { ok: false };
     } finally {
       setPending(false);
     }

@@ -1,9 +1,17 @@
+import { readFileSync } from "node:fs";
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { parse } from "jsonc-parser";
 import capnwebValidate from "capnweb-validate/vite";
 import { textModules } from "@veer/studio-kit/app-build";
 import { defineConfig } from "vitest/config";
 
-/** The Worker, in workerd, with the same flags it deploys with. */
+// Read from the config the Worker deploys with, so the two cannot drift.
+const deployed = parse(readFileSync(new URL("./wrangler.jsonc", import.meta.url), "utf8")) as {
+  compatibility_date: string;
+  compatibility_flags: string[];
+};
+
+/** The Worker, in workerd, with the same date and flags it deploys with. */
 export default defineConfig({
   plugins: [
     textModules(),
@@ -11,8 +19,8 @@ export default defineConfig({
     cloudflareTest({
       main: "./__tests__/worker.ts",
       miniflare: {
-        compatibilityDate: "2026-09-04",
-        compatibilityFlags: ["allow_irrevocable_stub_storage", "nodejs_als"],
+        compatibilityDate: deployed.compatibility_date,
+        compatibilityFlags: deployed.compatibility_flags,
         durableObjects: {
           FACET_HOST: { className: "StudioFacetHost", useSQLite: true },
           NOTES_STORE: { className: "ProbeNotesStore", useSQLite: true },

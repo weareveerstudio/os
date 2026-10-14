@@ -30,6 +30,7 @@ export default {
       build: {
         command: [
           'tsc -p tsconfig.json',
+          'tsc -p tsconfig.test.json',
           'tsc -p tsconfig.app.json',
           'tsc -p tsconfig.node.json',
         ].join(' && '),

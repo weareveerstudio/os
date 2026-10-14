@@ -12,6 +12,7 @@
     "./describe": "./src/describe.ts",
     "./guards": "./src/guards.ts",
     "./observers": "./src/observers.ts",
+    "./simulation": "./src/simulation.ts",
     "./sql": "./src/sql.ts",
     "./stores": "./src/stores.ts",
     "./testing": "./src/testing.ts",

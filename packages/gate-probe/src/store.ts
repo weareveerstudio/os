@@ -173,7 +173,7 @@ export class ProbeNotesStore extends DurableObject {
       if (note.archivedAt !== null) return;
       this.ctx.storage.sql.exec(
         "UPDATE notes SET archived_at = ?, archived_by = ? WHERE id = ?", Date.now(), actor.name, id);
-      this.#audit.append({ actor, action: "note.archive", target: id });
+      this.#audit.append({ actor, action: "note.archive", target: id, detail: { body: note.body } });
     });
     return this.getNote(id)!;
   }

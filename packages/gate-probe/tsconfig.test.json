@@ -1,0 +1,5 @@
+// The workerd tests, with the Worker sources they import.
+{
+  "extends": "./tsconfig.json",
+  "include": ["src", "__tests__/*.ts"]
+}

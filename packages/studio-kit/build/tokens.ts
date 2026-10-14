@@ -4,7 +4,7 @@
 //   node build/tokens.ts           report whether app/tokens.css is current (exit 1 if not)
 //   node build/tokens.ts --write   regenerate it
 //
-// `__tests__/node/tokens.test.ts` runs the same comparison, so a bump that changes the Workshop's
+// `__tests__/node/build.test.ts` runs the same comparison, so a bump that changes the Workshop's
 // tokens fails `pnpm test` until this is rerun.
 
 import { readFileSync, writeFileSync } from "node:fs";

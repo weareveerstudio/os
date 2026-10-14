@@ -1,6 +1,6 @@
 /**
- * The Probe app's flat `ui` capability, shared by the Worker (`ProbeAppApi`) and the app. Types
- * only: the app imports nothing else from the Worker.
+ * The Probe app's flat `ui` capability, shared by the Worker (`ProbeAppApi`) and the app: the types,
+ * and the one limit both enforce. The app imports nothing else from the Worker.
  */
 
 import type { AuditPage } from "@veer/studio-kit/audit-types";

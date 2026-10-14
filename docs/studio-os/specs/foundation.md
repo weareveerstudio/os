@@ -46,7 +46,8 @@ From [`../architecture.md`](../architecture.md):
 
 | Export | Kind | Role |
 | --- | --- | --- |
-| `GatekeeperVendor` (default) | `WorkerEntrypoint` | `describe()` with `autoProvisionsAccount: true`; `createAccount()` mints `ProbeAccount({props:{accountId: randomUUID()}})` |
+| default export | `fetch` handler | Plain-text health response at `/gatekeeper/probe` (the router binds the Worker bare) |
+| `GatekeeperVendor` | `WorkerEntrypoint` | `describe()` with `autoProvisionsAccount: true`; `createAccount()` mints `ProbeAccount({props:{accountId: randomUUID()}})` |
 | `ProbeAccount` | `WorkerEntrypoint<{accountId}>` | `describe()` (singleton + providesUi), `getSingletonGatekeeperClass()`, `startAppUi()`, `revoke()`, `getVerifier()` |
 | `ProbeVerifier` | `WorkerEntrypoint` | Trivial verifier, as the open observer policy needs none |
 | `ProbeGatekeeper` | `DurableObject<{accountId}>` facet | Per-workspace facet: session, journal, apply/reject |
@@ -177,7 +178,8 @@ at `/gatekeeper/probe`.
 - Deploy order: Error Reporter, Context, Scheduler, vendor Gatekeepers, custom Gatekeeper, **studio
   gates**, Workshop, router.
 - Compatibility: date `2026-09-04`, flags `allow_irrevocable_stub_storage` (later gates persist
-  verifier stubs) and `nodejs_als` (gatekeeper-kit's logger). `workers_dev` and preview URLs off, as
+  verifier stubs) and `nodejs_als` (parity with upstream's kit-based gatekeepers; the probe's own
+  imports don't need it). The workerd tests read both from `wrangler.jsonc`. `workers_dev` and preview URLs off, as
   for every Worker.
 - Rollback: set the probe's mode to disabled in `/admin` (no deploy); `wrangler rollback` for
   code-only changes; `probe.enabled: false` plus a deploy to unbind it. The report has the full plan.

@@ -11,7 +11,7 @@ Commits on `dev`, oldest first:
 | `a09ac3c` | `packages/studio-kit` and the Foundation spec |
 | `bf0297b` | `packages/gate-probe` (`veeros-gk-probe`) |
 | `6fbe64b` | Deploy wrapper: `studioGates`, `probe` block, golden and probe tests |
-| (this commit) | Review fixes, this report, canon re-verified at `d420d9bb` |
+| later commits | This report, the canon re-verified at `d420d9bb`, and the review fixes (section 3) |
 
 ## 1. What was built
 
@@ -43,9 +43,9 @@ All run from the repository root on Node 24.21 and pnpm 11.17.
 | Command | Result |
 | --- | --- |
 | `pnpm lint` | Pass: `vp lint` (warnings only, in tests), `tsc` for `scripts/`, every package build |
-| `pnpm test` | Pass: 47 script tests; studio-kit 25 workerd + 7 node + 6 jsdom; gate-probe 20 workerd + 6 jsdom; upstream gatekeeper-kit 701 + 124, observability 34, error-reporting 23, custom-gatekeeper 2, error-reporter 2 |
+| `pnpm test` | Pass: 52 script tests; studio-kit 25 workerd + 7 node + 9 jsdom; gate-probe 21 workerd + 13 jsdom; upstream gatekeeper-kit 701 + 124, observability 34, error-reporting 23, custom-gatekeeper 2, error-reporter 2 |
 | `pnpm check` (probe off) | Pass: six dry-runs, no `GATEKEEPER_PROBE` anywhere |
-| `pnpm check` (probe on, temporarily) | Pass: seven dry-runs; `veeros-gk-probe` bundles at 779 KiB (211 KiB gzip); the Workshop shows `env.GATEKEEPER_PROBE (veeros-gk-probe#GatekeeperVendor)` and the router `env.GATEKEEPER_PROBE (veeros-gk-probe)` |
+| `pnpm check` (probe on, temporarily) | Pass: seven dry-runs; `veeros-gk-probe` bundles at 781 KiB (211 KiB gzip); the Workshop shows `env.GATEKEEPER_PROBE (veeros-gk-probe#GatekeeperVendor)` and the router `env.GATEKEEPER_PROBE (veeros-gk-probe)` |
 
 Acceptance from the brief:
 
@@ -56,15 +56,53 @@ Acceptance from the brief:
 - **Probe on.** The router and the Workshop each gain exactly one `GATEKEEPER_PROBE`, appended last;
   every other Worker's config is unchanged (tested).
 - **Unit tests in the workerd pool** cover every `ui` method, the submit/apply/reject path,
-  simulation (a pending note is visible to the agent before approval), audit rows, and the admin
-  mark.
+  simulation (a pending note is visible to the agent before approval), audit rows, the admin mark,
+  and a capsule re-created in the same workspace.
 
 Noted, not a problem: the Workshop and router bundles differ by 0.01 KiB between dry-runs on the same
 upstream code; they are built in the submodule's own workspace, which this change does not touch.
 
 ## 3. Review
 
-REVIEW_PLACEHOLDER
+Three reviewers, each with its own lens, checked `2a7ce11..6fbe64b` read-only. They tried to
+refute each suspected problem before reporting it, and reproduced the high one. I then checked every
+finding against the code. All were fixed in the commits after `6fbe64b`; none were skipped.
+
+**Access, data, approvals and the agent surface**
+
+| Severity | Finding | Resolution |
+| --- | --- | --- |
+| High | `applyAction` was idempotent on `${workspaceId}:${actionId}`, as the canon prescribed. A capsule re-created after `/admin` "disabled", or after an account is removed and re-added, starts a fresh journal, and its ids restart at 1 under the same workspace id. Its first approved note then collided with an old key and was silently dropped. | studio-kit's `operationId()` is minted at submit and kept in the payload, and the probe claims the note id. A regression test covers two capsules in one workspace. The canon and spec are amended. |
+| Low | A display-name change could end up unaudited: the name and its audit row sit in different Durable Objects. | The change is now audited first and saved second. Docs name it as the one exception to "same transaction". |
+| Low | A lone surrogate passed validation, then was stored altered after the approver read it. | `requireText` and `normalizeDisplayName` refuse ill-formed strings. They now also allow ZWJ and ZWNJ, for Persian and emoji. |
+| Low | `INSERT OR REPLACE` could overwrite an audit row: SQLite's REPLACE does not fire DELETE triggers. | A third trigger blocks it, with a test. |
+| Low | `types.d.ts` left out limits the agent will hit. | It now documents the 500-note listing cap, the 50-pending cap, `createdAt` changing at approval, and the character rules. |
+
+**Spec conformance and the app**
+
+| Severity | Finding | Resolution |
+| --- | --- | --- |
+| Medium | Every 15-second poll of the audit log threw away the pages loaded with "Load older". | Pages are now merged by `seq`, with a test. |
+| Low | An agent's workspace read "can't open" while its title was still loading or the lookup had failed. Ids past the first 100 were never looked up. | "Can't open" now shows only for a `null` title, and the link works otherwise. Lookups go in batches of 100. Both have tests. |
+| Low | A failed first load had no retry. | Added a "Try again" button that does not reload the frame, with a test. |
+| Low | The audit log refreshed only after an add. | An archive or a rename now refreshes it too. |
+| Low | `useMutation` could not tell a falsy success from a failure. | `run()` now returns `{ok, value}`, with a test. |
+| Low | Three docs were stale: the tokens test path, the `ui-types.ts` header, and the spec's default export. | Corrected. |
+| Low | Archive buttons had no accessible context, and errors were not announced. | Archive buttons now have `aria-label`s, and errors render as `role="alert"`. |
+| Low | The audit log hid what changed. | Rows show a note snippet and the agent's workspace, and archive rows now record the note body. |
+| Gap | studio-kit had no simulation convention (brief deliverable 3). | Added `foldPending`, which the probe now uses. |
+| Gap | The shell and page tests missed the risky paths. | Added a real handshake, theme-push and `ui` test over a MessageChannel, a stale-response test, a compile-time test that `FlatUi` rejects nested members, and the page tests above. |
+
+**Contract and deploy safety.** No high or medium findings. The reviewer independently confirmed
+that every existing Worker's config is byte-identical, on the golden fixtures and on the real
+`deployment.jsonc`, and that `buildCommands` is unchanged.
+
+| Severity | Finding | Resolution |
+| --- | --- | --- |
+| Low | The probe's workerd tests hardcoded the compatibility date and flags. | They now read them from `wrangler.jsonc`. studio-kit keeps literals, because it has no Worker of its own. |
+| Low | The stated reason for `nodejs_als` was wrong: nothing the probe imports reaches AsyncLocalStorage. | The comment and spec are corrected. The flag stays for parity with upstream's kit gatekeepers. |
+| Low | Both installs write gatekeeper-kit's `node_modules`, which live Workers bundle, and `jose` is not covered by the catalog mirror. | New `scripts/lockfile-parity.test.ts` asserts that every submodule member resolves its runtime dependencies to the same versions in both lockfiles. |
+| Note | `capnweb-validate` also processed the probe's test files. | The test files now type-check under `tsconfig.test.json`. |
 
 ## 4. Deploy plan
 
@@ -185,9 +223,11 @@ Then decide the probe's lifetime (section 6).
 4. **The `studio-spec` and `studio-build` workflows** hardcode `ROOT=/Users/shahriar/...` and forbid
    commits. They work on your Mac, not in a cloud session; this session followed the same steps by
    hand and committed to `dev` because a cloud container is discarded.
-5. **`pnpm test` now runs upstream gatekeeper-kit's suite** (825 tests) because the kit is a workspace
-   member. It proves the kit works under this install; filter it out in the root `test` script if
-   the time matters.
+5. **`pnpm test` now runs upstream gatekeeper-kit's suite** (825 tests), and so does `pnpm check`,
+   because the kit is a workspace member. It proves the kit works under this install, but an
+   upstream flake would block a deploy check. To drop it, add
+   `--filter '!@gadgets/gatekeeper-kit' --filter '!@gadgets/observability'` to the root `test`
+   script.
 6. **Test noise.** The workerd pool logs `uncaught exception` lines for Durable Object calls that
    reject on purpose. The runs pass with no unhandled errors; upstream's suites show the same.
 7. **Frontend error reporting** is not wired into studio apps. It is disabled for this deployment

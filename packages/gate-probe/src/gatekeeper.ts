@@ -16,11 +16,6 @@ import {
   type TaggedAction,
 } from "@gadgets/gatekeeper-kit/actions";
 import { buildDescription } from "@gadgets/gatekeeper-kit/action-description";
-import {
-  createSimulationView,
-  replaySimulation,
-  type SimulationStep,
-} from "@gadgets/gatekeeper-kit/simulation";
 import type {
   ActionKind,
   AgentCatalog,
@@ -37,6 +32,7 @@ import {
   observation,
   openObservers,
 } from "@veer/studio-kit/observers";
+import { foldPending } from "@veer/studio-kit/simulation";
 import { sharedStore } from "@veer/studio-kit/stores";
 import { requireNoteBody, type ProbeNotesStore, type StoredNote } from "./store.js";
 import type { ProbeNote, ProbeSession } from "./types.js";
@@ -133,22 +129,13 @@ export function simulateNotes(
   pending: readonly PendingAction[],
   workspaceId: string,
 ): ProbeNote[] {
-  const view = createSimulationView(pending, () => ["notes"]);
-  const result = replaySimulation<ProbeNote[], PendingAction>(
-    [...stored],
-    view.all(),
-    (notes, record): SimulationStep<ProbeNote[]> => {
-      const { action } = record;
-      if (action.kind !== "addNote") {
-        return { kind: "unsupported", reason: `Unknown queued action ${String(action.kind)}.` };
-      }
-      if (notes.some((note) => note.id === action.payload.noteId)) return { kind: "known-no-effect" };
-      return { kind: "applied", value: [pendingNote(action.payload, workspaceId), ...notes] };
-    },
-  );
-  // Only one kind exists, so an incomplete replay means a kind this deploy dropped: its record
-  // fails at apply and stops projecting, so the partial view is the honest one.
-  return result.kind === "complete" ? result.value : result.partial;
+  return foldPending([...stored], pending, (notes, { action }) => {
+    if (action.kind !== "addNote") {
+      return { kind: "unsupported", reason: `Unknown queued action ${String(action.kind)}.` };
+    }
+    if (notes.some((note) => note.id === action.payload.noteId)) return { kind: "known-no-effect" };
+    return { kind: "applied", value: [pendingNote(action.payload, workspaceId), ...notes] };
+  });
 }
 
 type SessionDependencies = {

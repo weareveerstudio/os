@@ -1,7 +1,18 @@
+import { RpcTarget, newMessagePortRpcSession, type RpcStub } from "capnweb";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StudioErrorBoundary, applyAppTheme, errorMessage, useMutation, usePolled } from "../../app/index.js";
+import type { GatekeeperAppTheme, GatekeeperAppThemeReceiver } from "@gadgets/workshop-shared/theme";
+import {
+  StudioErrorBoundary,
+  applyAppTheme,
+  errorMessage,
+  mountStudioApp,
+  useMutation,
+  usePolled,
+  type FlatUi,
+  type StudioAppHost,
+} from "../../app/index.js";
 
 // React's act() needs to know it runs in a test environment.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -61,7 +72,90 @@ describe("StudioErrorBoundary", () => {
   });
 });
 
+describe("mountStudioApp", () => {
+  type PingUi = { ping(): Promise<string> };
+
+  class FakeUi extends RpcTarget {
+    ping(): string {
+      return "pong";
+    }
+  }
+
+  /** Stands in for the Workshop's GatekeeperAppHostImpl on the other end of the port. */
+  class FakeHost extends RpcTarget {
+    receiver: RpcStub<GatekeeperAppThemeReceiver> | null = null;
+    get ui() {
+      return new FakeUi();
+    }
+    subscribeTheme(receiver: RpcStub<GatekeeperAppThemeReceiver>): GatekeeperAppTheme {
+      this.receiver = receiver.dup();
+      return { mode: "dark", accentColor: null };
+    }
+  }
+
+  function Pinger({ host }: { host: StudioAppHost<PingUi> }) {
+    const [reply, setReply] = useState("none");
+    return <button onClick={async () => setReply(await host.ui.ping())}>{reply}</button>;
+  }
+
+  it("handshakes once, follows the host's theme, and reaches the ui", async () => {
+    const element = document.createElement("div");
+    element.id = "root";
+    document.body.append(element);
+    const post = vi.spyOn(window, "postMessage").mockImplementation(() => {});
+    const host = new FakeHost();
+    try {
+      await act(async () => mountStudioApp<PingUi>({ appName: "Test", render: (h) => <Pinger host={h} /> }));
+      expect(post).toHaveBeenCalledTimes(1);
+      const [message, origin, transfer] = post.mock.calls[0] as unknown as [unknown, string, MessagePort[]];
+      expect(message).toEqual({ type: "handshake" });
+      expect(origin).toBe("*");
+      newMessagePortRpcSession(transfer[0], host);
+
+      await vi.waitFor(() => expect(document.documentElement.dataset.mode).toBe("dark"));
+      await act(async () => host.receiver!.setTheme({ mode: "light", accentColor: "#3b82f6" }));
+      await vi.waitFor(() => expect(document.documentElement.dataset.mode).toBe("light"));
+
+      await act(async () => element.querySelector("button")!.click());
+      await vi.waitFor(() => expect(element.textContent).toBe("pong"));
+      expect(post).toHaveBeenCalledTimes(1);
+    } finally {
+      post.mockRestore();
+      element.remove();
+    }
+  });
+});
+
+describe("FlatUi", () => {
+  it("accepts methods only, at the top level", () => {
+    type Flat = { list(): Promise<string[]>; add(body: string): Promise<void> };
+    type Nested = { list(): Promise<string[]>; notes: { add(body: string): Promise<void> } };
+    const flat: FlatUi<Flat> = {} as Flat;
+    // @ts-expect-error -- `notes` is an object, which the host's rate limiter cannot forward.
+    const nested: FlatUi<Nested> = {} as Nested;
+    expect([flat, nested]).toHaveLength(2);
+  });
+});
+
 describe("usePolled", () => {
+  it("drops a response that arrives after a newer request", async () => {
+    const resolvers: ((value: string) => void)[] = [];
+    let refresh: () => Promise<void> = async () => {};
+    function Slow() {
+      const polled = usePolled(() => new Promise<string>((resolve) => resolvers.push(resolve)), {
+        intervalMs: 0,
+      });
+      refresh = polled.refresh;
+      return <p>{polled.data ?? "loading"}</p>;
+    }
+    await act(async () => root.render(<Slow />));
+    act(() => void refresh());
+    // The newer request answers first; the older one's late answer must not overwrite it.
+    await act(async () => resolvers[1]("fresh"));
+    await act(async () => resolvers[0]("stale"));
+    expect(container.textContent).toBe("fresh");
+  });
+
   it("loads, then reloads on refresh", async () => {
     let calls = 0;
     const load = vi.fn(async () => ++calls);
@@ -94,7 +188,10 @@ describe("useMutation", () => {
       mutation = useMutation();
       const [result, setResult] = useState<string>("none");
       return (
-        <button onClick={async () => setResult(String(await mutation.run(async () => "saved")))}>
+        <button onClick={async () => {
+          const outcome = await mutation.run(async () => "saved");
+          setResult(outcome.ok ? outcome.value : "failed");
+        }}>
           {mutation.error ?? result}
         </button>
       );
@@ -103,8 +200,14 @@ describe("useMutation", () => {
     await act(async () => container.querySelector("button")!.click());
     expect(container.textContent).toBe("saved");
 
-    await act(async () => { await mutation.run(async () => { throw new Error("Error: nope"); }); });
+    let outcome: Awaited<ReturnType<typeof mutation.run>> | undefined;
+    await act(async () => { outcome = await mutation.run(async () => { throw new Error("Error: nope"); }); });
+    expect(outcome).toEqual({ ok: false });
     expect(container.textContent).toBe("nope");
     expect(mutation.pending).toBe(false);
+
+    // A write that resolves to nothing still succeeds.
+    await act(async () => { outcome = await mutation.run(async () => undefined); });
+    expect(outcome).toEqual({ ok: true, value: undefined });
   });
 });

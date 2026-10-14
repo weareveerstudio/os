@@ -11,7 +11,8 @@
   },
   "compatibility_date": "2026-09-04",
   // allow_irrevocable_stub_storage: studio gates may persist verifier stubs (Finance's tracked
-  // observers do). nodejs_als: gatekeeper-kit's logger runs on AsyncLocalStorage.
+  // observers do). nodejs_als: kept for parity with upstream's kit-based gatekeepers, whose
+  // observability context runs on AsyncLocalStorage; the probe's own imports don't reach it today.
   "compatibility_flags": ["allow_irrevocable_stub_storage", "nodejs_als"],
   "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": false }],
   "migrations": [

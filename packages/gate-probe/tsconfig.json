@@ -1,4 +1,5 @@
-// The Worker and its workerd tests. Type-check only: wrangler bundles the sources.
+// The Worker. Type-check only: wrangler bundles the sources. `capnweb-validate build` reads this
+// file too, so it covers `src` alone; the workerd tests are in tsconfig.test.json.
 {
   "extends": "../../cloudflare-os/tsconfig.json",
   "compilerOptions": {
@@ -8,6 +9,6 @@
     "moduleResolution": "bundler",
     "types": ["@cloudflare/workers-types/experimental", "@cloudflare/vitest-pool-workers/types"]
   },
-  "include": ["src", "__tests__/*.ts"],
+  "include": ["src"],
   "exclude": ["node_modules", ".wrangler", "dist-app"]
 }

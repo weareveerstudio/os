@@ -1,12 +1,18 @@
 import { Badge, Banner, Button, Input, InputArea, LayerCard, Loader, Switch, Text } from "@cloudflare/kumo";
 import { useMutation, usePolled, type StudioAppHost } from "@veer/studio-kit/app";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { AuditEntry, AuditPage } from "@veer/studio-kit/audit-types";
+import { useEffect, useState, type FormEvent } from "react";
+import type { AuditEntry } from "@veer/studio-kit/audit-types";
 import { MAX_NOTE_LENGTH, type ProbeNoteView, type ProbeUi, type ProbeViewer } from "../src/ui-types";
 
 type Host = StudioAppHost<ProbeUi>;
 
+/** Live workspace titles: a string, null for one the viewer can't open, absent while unknown. */
+type Titles = ReadonlyMap<string, string | null>;
+
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+/** The host resolves at most this many workspace ids per call. */
+const MAX_TITLES_PER_LOOKUP = 100;
 
 /** "3 minutes ago", for times within a week; a date beyond that. */
 export function formatWhen(at: number, now = Date.now()): string {
@@ -22,6 +28,73 @@ export function formatWhen(at: number, now = Date.now()): string {
   return new Date(at).toLocaleDateString();
 }
 
+/** The first line of a note, shortened for labels and the audit log. */
+export function snippet(body: string, max = 60): string {
+  const line = body.split("\n", 1)[0].trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** A failure message screen readers announce. */
+function ErrorText({ children }: { children: string | null }) {
+  if (!children) return null;
+  return <div role="alert"><Text size="sm" variant="error">{children}</Text></div>;
+}
+
+/**
+ * Resolves the workspace titles for `ids`, looking up only the ones not known yet, in batches the
+ * host accepts. A failed lookup leaves its ids unknown, to be tried again when the ids change.
+ */
+function useWorkspaceTitles(host: Host, ids: readonly string[]): Titles {
+  const [titles, setTitles] = useState<Map<string, string | null>>(() => new Map());
+  // Keyed by content, so a new array of the same ids on every render looks nothing up.
+  const key = [...new Set(ids)].toSorted().join(",");
+
+  useEffect(() => {
+    const missing = key ? key.split(",").filter((id) => !titles.has(id)) : [];
+    if (!missing.length) return;
+    let current = true;
+    for (let start = 0; start < missing.length; start += MAX_TITLES_PER_LOOKUP) {
+      const batch = missing.slice(start, start + MAX_TITLES_PER_LOOKUP);
+      host.resolveWorkspaceTitles(batch).then(
+        (resolved) => {
+          if (!current) return;
+          setTitles((known) => {
+            const next = new Map(known);
+            batch.forEach((id, index) => next.set(id, resolved[index] ?? null));
+            return next;
+          });
+        },
+        () => {},
+      );
+    }
+    return () => {
+      current = false;
+    };
+    // `key` stands for `ids`; `titles` is read only to skip known ids.
+  }, [host, key]);
+
+  return titles;
+}
+
+/** Names an agent's workspace: a link to it, or a note that the viewer can't open it. */
+function AgentWorkspace({ host, workspaceId, titles }: {
+  host: Host;
+  workspaceId: string;
+  titles: Titles;
+}) {
+  const title = titles.get(workspaceId);
+  if (title === null) return <Text size="sm" variant="secondary">a workspace you can't open</Text>;
+  return (
+    <button
+      type="button"
+      className="text-sm text-kumo-link hover:underline"
+      onClick={() => void host.openWorkspace(workspaceId)}
+    >
+      {title ?? "Open workspace"}
+    </button>
+  );
+}
+
 function ViewerCard({ host, viewer, onChange }: {
   host: Host;
   viewer: ProbeViewer;
@@ -33,10 +106,10 @@ function ViewerCard({ host, viewer, onChange }: {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const next = await save.run(() => host.ui.setDisplayName(name));
-    if (next) {
-      onChange(next);
-      setName(next.displayName ?? "");
+    const result = await save.run(() => host.ui.setDisplayName(name));
+    if (result.ok) {
+      onChange(result.value);
+      setName(result.value.displayName ?? "");
     }
   }
 
@@ -67,7 +140,7 @@ function ViewerCard({ host, viewer, onChange }: {
           checked against your sign-in.
         </Text>
       )}
-      {save.error && <Text size="sm" variant="error">{save.error}</Text>}
+      <ErrorText>{save.error}</ErrorText>
     </LayerCard>
   );
 }
@@ -78,7 +151,7 @@ function AddNote({ host, canWrite, onAdded }: { host: Host; canWrite: boolean; o
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (await add.run(() => host.ui.addNote(body))) {
+    if ((await add.run(() => host.ui.addNote(body))).ok) {
       setBody("");
       onAdded();
     }
@@ -102,17 +175,17 @@ function AddNote({ host, canWrite, onAdded }: { host: Host; canWrite: boolean; o
             Add note
           </Button>
         </div>
-        {add.error && <Text size="sm" variant="error">{add.error}</Text>}
+        <ErrorText>{add.error}</ErrorText>
       </form>
     </LayerCard>
   );
 }
 
-function NoteRow({ host, note, canWrite, workspaceTitle, onChanged }: {
+function NoteRow({ host, note, canWrite, titles, onChanged }: {
   host: Host;
   note: ProbeNoteView;
   canWrite: boolean;
-  workspaceTitle: string | null | undefined;
+  titles: Titles;
   onChanged(): void;
 }) {
   const archive = useMutation();
@@ -127,17 +200,7 @@ function NoteRow({ host, note, canWrite, workspaceTitle, onChanged }: {
           : (
             <span className="flex items-center gap-1">
               <Badge variant="info">Agent</Badge>
-              {workspaceTitle
-                ? (
-                  <button
-                    type="button"
-                    className="text-sm text-kumo-link hover:underline"
-                    onClick={() => void host.openWorkspace(author.workspaceId)}
-                  >
-                    {workspaceTitle}
-                  </button>
-                )
-                : <Text size="sm" variant="secondary">a workspace you can't open</Text>}
+              <AgentWorkspace host={host} workspaceId={author.workspaceId} titles={titles} />
             </span>
           )}
         <Text size="sm" variant="secondary">
@@ -153,10 +216,11 @@ function NoteRow({ host, note, canWrite, workspaceTitle, onChanged }: {
             <Button
               size="sm"
               variant="ghost"
+              aria-label={`Archive note: ${snippet(note.body)}`}
               loading={archive.pending}
               disabled={!canWrite}
               onClick={async () => {
-                if (await archive.run(() => host.ui.archiveNote(note.id))) onChanged();
+                if ((await archive.run(() => host.ui.archiveNote(note.id))).ok) onChanged();
               }}
             >
               Archive
@@ -164,47 +228,23 @@ function NoteRow({ host, note, canWrite, workspaceTitle, onChanged }: {
           </div>
         )}
       </div>
-      {archive.error && <Text size="sm" variant="error">{archive.error}</Text>}
+      <ErrorText>{archive.error}</ErrorText>
     </li>
   );
 }
 
-function useWorkspaceTitles(host: Host, notes: ProbeNoteView[] | undefined) {
-  const ids = useMemo(() => {
-    const unique = new Set<string>();
-    for (const note of notes ?? []) {
-      if (note.author.kind === "agent") unique.add(note.author.workspaceId);
-    }
-    // The host resolves at most 100 per call.
-    return [...unique].toSorted().slice(0, 100);
-  }, [notes]);
-  const key = ids.join(",");
-  const [titles, setTitles] = useState<Map<string, string | null>>(new Map());
-
-  useEffect(() => {
-    if (!ids.length) return;
-    let current = true;
-    host.resolveWorkspaceTitles(ids).then(
-      (resolved) => {
-        if (current) setTitles(new Map(ids.map((id, index) => [id, resolved[index] ?? null])));
-      },
-      () => {},
-    );
-    return () => {
-      current = false;
-    };
-    // `key` stands for `ids`, whose identity changes on every poll.
-  }, [host, key]);
-
-  return titles;
-}
-
-function Notes({ host, canWrite, refreshToken }: { host: Host; canWrite: boolean; refreshToken: number }) {
+function Notes({ host, canWrite, refreshToken, onChanged }: {
+  host: Host;
+  canWrite: boolean;
+  refreshToken: number;
+  onChanged(): void;
+}) {
   const [includeArchived, setIncludeArchived] = useState(false);
   const notes = usePolled(() => host.ui.listNotes({ includeArchived }), {
     deps: [includeArchived, refreshToken],
   });
-  const titles = useWorkspaceTitles(host, notes.data);
+  const titles = useWorkspaceTitles(host, (notes.data ?? []).flatMap((note) =>
+    note.author.kind === "agent" ? [note.author.workspaceId] : []));
 
   return (
     <LayerCard className="overflow-hidden bg-kumo-control p-0">
@@ -225,8 +265,8 @@ function Notes({ host, canWrite, refreshToken }: { host: Host; canWrite: boolean
               host={host}
               note={note}
               canWrite={canWrite}
-              workspaceTitle={note.author.kind === "agent" ? titles.get(note.author.workspaceId) : undefined}
-              onChanged={() => void notes.refresh()}
+              titles={titles}
+              onChanged={onChanged}
             />
           ))}
         </ul>
@@ -235,36 +275,60 @@ function Notes({ host, canWrite, refreshToken }: { host: Host; canWrite: boolean
   );
 }
 
-function describeAudit(entry: AuditEntry): string {
-  const who = entry.actor.kind === "person" ? entry.actor.name : "An agent";
-  switch (entry.action) {
-    case "note.add": return `${who} added a note`;
-    case "note.archive": return `${who} archived a note`;
-    case "profile.set-name": return `${who} set their display name`;
-    default: return `${who}: ${entry.action}`;
-  }
+function AuditRow({ host, entry, titles }: { host: Host; entry: AuditEntry; titles: Titles }) {
+  const body = typeof entry.detail?.body === "string" ? entry.detail.body : null;
+  const verb = entry.action === "note.add" ? "added a note"
+    : entry.action === "note.archive" ? "archived a note"
+    : entry.action === "profile.set-name" ? "set their display name"
+    : entry.action;
+  return (
+    <li className="flex flex-col gap-1 px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-3">
+        <span className="flex flex-wrap items-center gap-1">
+          {entry.actor.kind === "person"
+            ? <Text size="sm">{entry.actor.name} {verb}</Text>
+            : (
+              <>
+                <Text size="sm">An agent in</Text>
+                <AgentWorkspace host={host} workspaceId={entry.actor.workspaceId} titles={titles} />
+                <Text size="sm">{verb}</Text>
+              </>
+            )}
+        </span>
+        <Text size="sm" variant="secondary">{formatWhen(entry.at)}</Text>
+      </div>
+      {body !== null && <Text size="sm" variant="secondary">“{snippet(body, 80)}”</Text>}
+    </li>
+  );
+}
+
+/** Merges pages of the log by `seq`, newest first, so a poll of the head never drops older pages. */
+export function mergeAudit(...pages: readonly (readonly AuditEntry[])[]): AuditEntry[] {
+  const bySeq = new Map<number, AuditEntry>();
+  for (const page of pages) for (const entry of page) bySeq.set(entry.seq, entry);
+  return [...bySeq.values()].toSorted((a, b) => b.seq - a.seq);
 }
 
 function AuditLog({ host, refreshToken }: { host: Host; refreshToken: number }) {
+  const head = usePolled(() => host.ui.listAuditLog({ limit: 25 }), { deps: [refreshToken] });
+  // Pages loaded with "Load older", and where the next one starts. Kept across polls of the head.
   const [older, setOlder] = useState<AuditEntry[]>([]);
-  const [cursor, setCursor] = useState<number | undefined>(undefined);
-  const first = usePolled(() => host.ui.listAuditLog({ limit: 25 }), { deps: [refreshToken] });
+  const [olderCursor, setOlderCursor] = useState<number | undefined>(undefined);
   const more = useMutation();
 
-  useEffect(() => {
-    setOlder([]);
-    setCursor(first.data?.nextBefore);
-  }, [first.data]);
+  const cursor = older.length ? olderCursor : head.data?.nextBefore;
+  const entries = mergeAudit(head.data?.entries ?? [], older);
+  const titles = useWorkspaceTitles(host, entries.flatMap((entry) =>
+    entry.actor.kind === "agent" ? [entry.actor.workspaceId] : []));
 
   async function loadOlder() {
-    const page: AuditPage | undefined = await more.run(() => host.ui.listAuditLog({ limit: 25, before: cursor }));
-    if (page) {
-      setOlder((entries) => [...entries, ...page.entries]);
-      setCursor(page.nextBefore);
+    const result = await more.run(() => host.ui.listAuditLog({ limit: 25, before: cursor }));
+    if (result.ok) {
+      setOlder((loaded) => mergeAudit(loaded, result.value.entries));
+      setOlderCursor(result.value.nextBefore);
     }
   }
 
-  const entries = [...(first.data?.entries ?? []), ...older];
   return (
     <LayerCard className="overflow-hidden bg-kumo-control p-0">
       <div className="border-b border-kumo-line p-4">
@@ -273,14 +337,9 @@ function AuditLog({ host, refreshToken }: { host: Host; refreshToken: number }) 
           Every change to the notes, by people in this app and by approved agent actions. Admins only.
         </Text>
       </div>
-      {first.error && <div className="p-4"><Banner variant="error">{first.error}</Banner></div>}
+      {head.error && <div className="p-4"><Banner variant="error">{head.error}</Banner></div>}
       <ul className="m-0 list-none divide-y divide-kumo-line p-0">
-        {entries.map((entry) => (
-          <li key={entry.seq} className="flex items-center justify-between gap-3 px-4 py-2">
-            <Text size="sm">{describeAudit(entry)}</Text>
-            <Text size="sm" variant="secondary">{formatWhen(entry.at)}</Text>
-          </li>
-        ))}
+        {entries.map((entry) => <AuditRow key={entry.seq} host={host} entry={entry} titles={titles} />)}
       </ul>
       {cursor !== undefined && (
         <div className="p-3">
@@ -289,7 +348,7 @@ function AuditLog({ host, refreshToken }: { host: Host; refreshToken: number }) 
           </Button>
         </div>
       )}
-      {more.error && <Text size="sm" variant="error" DANGEROUS_className="block p-3">{more.error}</Text>}
+      <div className="px-3 pb-3"><ErrorText>{more.error}</ErrorText></div>
     </LayerCard>
   );
 }
@@ -298,13 +357,23 @@ function AuditLog({ host, refreshToken }: { host: Host; refreshToken: number }) 
 export default function ProbePage({ host }: { host: Host }) {
   const viewer = usePolled(() => host.ui.getViewer(), { intervalMs: 0 });
   const [current, setCurrent] = useState<ProbeViewer | undefined>(undefined);
+  // Bumped by every change made here, so the notes and the audit log reload at once rather than
+  // at their next poll.
   const [refreshToken, setRefreshToken] = useState(0);
+  const changed = () => setRefreshToken((n) => n + 1);
   const me = current ?? viewer.data;
 
   if (!me) {
     return (
-      <main className="flex min-h-screen items-center justify-center p-6">
-        {viewer.error ? <Banner variant="error">{viewer.error}</Banner> : <Loader />}
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 p-6">
+        {viewer.error
+          ? (
+            <>
+              <Banner variant="error">{viewer.error}</Banner>
+              <Button variant="secondary" onClick={() => void viewer.refresh()}>Try again</Button>
+            </>
+          )
+          : <Loader />}
       </main>
     );
   }
@@ -318,9 +387,9 @@ export default function ProbePage({ host }: { host: Host }) {
           Shared notes for the studio and its agents. Foundation's proving gate.
         </Text>
       </header>
-      <ViewerCard host={host} viewer={me} onChange={setCurrent} />
-      <AddNote host={host} canWrite={canWrite} onAdded={() => setRefreshToken((n) => n + 1)} />
-      <Notes host={host} canWrite={canWrite} refreshToken={refreshToken} />
+      <ViewerCard host={host} viewer={me} onChange={(next) => { setCurrent(next); changed(); }} />
+      <AddNote host={host} canWrite={canWrite} onAdded={changed} />
+      <Notes host={host} canWrite={canWrite} refreshToken={refreshToken} onChanged={changed} />
       {me.isAdmin && <AuditLog host={host} refreshToken={refreshToken} />}
     </main>
   );

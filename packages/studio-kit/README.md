@@ -19,6 +19,7 @@ Everything here is either a plain helper or a Durable Object reached through the
 | `./sql` | `migrate(storage, steps)`: append-only, transactional schema steps |
 | `./audit-log` | `AuditLog`, `AUDIT_LOG_MIGRATIONS`: append-only (trigger-enforced) change history |
 | `./actions` | `agentWrite` (auto-approvable, continue-with-simulation), `actionKind`, `operationId`, `AppliedActions` |
+| `./simulation` | `foldPending`: show an agent its own pending writes in every read |
 | `./observers` | `observation()` descriptions, `BASELINE`, the kit's gate and strategies |
 | `./guards` | `requireAdmin`, `requireText`, `requireId` |
 | `./testing` | `FakeApprovalQueue`, `StudioFacetHost`, `rejectionMessage` for workerd suites |
@@ -38,7 +39,9 @@ Everything here is either a plain helper or a Durable Object reached through the
   app's interface as `class XAppApi extends RpcTarget implements FlatUi<XUi>`.
 - **The app never reloads itself.** The host accepts one handshake per mount.
 - **The app declares its own CSP.** The Workshop injects none; `buildStudioApp` writes it.
-- **Human edits are audited** in the same transaction as the edit, and require a display name.
+- **Human edits are audited** in the same transaction as the edit, and require a display name. The
+  one exception is a display-name change: the name lives in `StudioAccountState`, so it is audited
+  first and saved second, and a failure in between leaves a record of a change that a retry repeats.
 
 ## Keeping in step with the Workshop
 

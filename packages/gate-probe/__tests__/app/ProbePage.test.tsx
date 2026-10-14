@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { StudioAppHost } from "@veer/studio-kit/app";
 import type { AuditEntry } from "@veer/studio-kit/audit-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import ProbePage, { formatWhen } from "../../app/ProbePage";
+import ProbePage, { formatWhen, mergeAudit, snippet } from "../../app/ProbePage";
 import type { ProbeNoteView, ProbeUi, ProbeViewer } from "../../src/ui-types";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,9 +38,12 @@ function fakeHost(viewer: ProbeViewer, notes: ProbeNoteView[] = []) {
       note.archivedBy = viewer.displayName;
       return note;
     },
-    listAuditLog: async () => {
+    listAuditLog: async (options) => {
       if (!viewer.isAdmin) throw new Error("The audit log is available to admins only.");
-      return { entries: audit };
+      const limit = options?.limit ?? 50;
+      const older = audit.filter((entry) => options?.before === undefined || entry.seq < options.before);
+      const entries = older.slice(0, limit);
+      return older.length > limit ? { entries, nextBefore: entries.at(-1)!.seq } : { entries };
     },
   };
   const host: StudioAppHost<ProbeUi> = {
@@ -151,6 +154,101 @@ describe("ProbePage", () => {
     await act(async () => button("Add note").click());
     await act(async () => {});
     expect(container.textContent).toContain("Audrey added a note");
+  });
+});
+
+describe("ProbePage, admin views", () => {
+  function seedAudit(audit: AuditEntry[], count: number) {
+    for (let seq = 1; seq <= count; seq++) {
+      audit.unshift({
+        seq, at: Date.now() - (count - seq) * 1000,
+        actor: { kind: "person", accountId: "acct", name: "Audrey", isAdmin: true },
+        action: "note.add", target: `n${seq}`, detail: { body: `Note number ${seq}` },
+      });
+    }
+  }
+
+  it("keeps older audit pages across polls", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const admin = fakeHost({ isAdmin: true, displayName: "Audrey" });
+      seedAudit(admin.audit, 40);
+      await render(admin.host);
+      expect(container.querySelectorAll("li").length).toBe(25);
+      await act(async () => button("Load older").click());
+      await act(async () => {});
+      expect(container.textContent).toContain("Note number 1");
+      // A poll of the head page must not drop what was paged in.
+      await act(async () => { vi.advanceTimersByTime(16_000); });
+      await act(async () => {});
+      expect(container.textContent).toContain("Note number 1");
+      expect(container.textContent).toContain("Note number 40");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows what changed, and who", async () => {
+    const admin = fakeHost({ isAdmin: true, displayName: "Audrey" });
+    seedAudit(admin.audit, 1);
+    await render(admin.host);
+    expect(container.textContent).toContain("Audrey added a note");
+    expect(container.textContent).toContain("“Note number 1”");
+  });
+});
+
+describe("ProbePage, resilience", () => {
+  const agentNote = (): ProbeNoteView => ({
+    id: crypto.randomUUID(), body: "From an agent", createdAt: Date.now(),
+    author: { kind: "agent", workspaceId: AGENT_WORKSPACE }, archivedAt: null, archivedBy: null,
+  });
+
+  it("still links an agent's workspace when its title can't be looked up", async () => {
+    const { host } = fakeHost({ isAdmin: false, displayName: "Ada" }, [agentNote()]);
+    host.resolveWorkspaceTitles = vi.fn(async () => { throw new Error("lookup failed"); });
+    await render(host);
+    expect(container.textContent).not.toContain("can't open");
+    await act(async () => button("Open workspace").click());
+    expect(host.openWorkspace).toHaveBeenCalledWith(AGENT_WORKSPACE);
+  });
+
+  it("says a workspace can't be opened only when the host says so", async () => {
+    const { host } = fakeHost({ isAdmin: false, displayName: "Ada" }, [agentNote()]);
+    host.resolveWorkspaceTitles = vi.fn(async (ids: string[]) => ids.map(() => null));
+    await render(host);
+    expect(container.textContent).toContain("a workspace you can't open");
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Open workspace")).toBe(false);
+  });
+
+  it("retries a failed first load without reloading the frame", async () => {
+    const { host, ui } = fakeHost({ isAdmin: false, displayName: "Ada" });
+    const getViewer = ui.getViewer;
+    let fail = true;
+    ui.getViewer = async () => {
+      if (fail) throw new Error("Error: offline");
+      return getViewer();
+    };
+    await render(host);
+    expect(container.textContent).toContain("offline");
+    fail = false;
+    await act(async () => button("Try again").click());
+    await act(async () => {});
+    expect(container.textContent).toContain("Member");
+  });
+});
+
+describe("helpers", () => {
+  it("shortens a note to its first line", () => {
+    expect(snippet("first line\nsecond")).toBe("first line");
+    expect(snippet("x".repeat(100), 10)).toBe("xxxxxxxxx…");
+  });
+
+  it("merges audit pages by seq, newest first", () => {
+    const entry = (seq: number): AuditEntry => ({
+      seq, at: seq, actor: { kind: "agent", accountId: "a", workspaceId: "w" }, action: "note.add",
+      target: null, detail: null,
+    });
+    expect(mergeAudit([entry(3), entry(2)], [entry(2), entry(1)]).map((e) => e.seq)).toEqual([3, 2, 1]);
   });
 });
 

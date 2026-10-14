@@ -2,7 +2,9 @@
  * The append-only audit log a gate keeps beside its studio data.
  *
  * Nothing in the sidebar-app path is audited or approved by the Workshop, so every human edit made
- * in a gate's app is recorded here, in the same storage transaction as the edit. Agent writes reach
+ * in a gate's app is recorded here, in the same storage transaction as the edit. A display-name
+ * change is the exception: the name lives in the account's own `StudioAccountState`, so the gate
+ * audits it first and saves it second. Agent writes reach
  * the store through `applyAction` after the Workshop's own approval record; gates log those too, so
  * one table holds the store's complete change history.
  *

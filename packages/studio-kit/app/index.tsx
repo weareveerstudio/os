@@ -21,7 +21,13 @@ import type { UiClient } from "./ui-client.js";
 
 export { applyAppTheme } from "./theme.js";
 export { errorMessage, type FlatUi, type UiClient } from "./ui-client.js";
-export { useMutation, usePolled, type Mutation, type Polled } from "./hooks.js";
+export {
+  useMutation,
+  usePolled,
+  type Mutation,
+  type MutationResult,
+  type Polled,
+} from "./hooks.js";
 
 /** What `setPresenting` resolves with: where the host placed the overlay, if anywhere. */
 export type PresentAck = {
